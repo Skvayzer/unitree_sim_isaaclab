@@ -45,6 +45,8 @@ class ObjectTableSceneCfg(TableRedGreenYellowBlockSceneCfg):
 
     # 6. add camera configuration 
     front_camera = CameraPresets.g1_front_camera()
+    front_camera_left = CameraPresets.g1_front_camera_left()
+    front_camera_right = CameraPresets.g1_front_camera_right()
     left_wrist_camera = CameraPresets.left_dex3_wrist_camera()
     right_wrist_camera = CameraPresets.right_dex3_wrist_camera()
 

@@ -86,6 +86,22 @@ class CameraPresets:
     def g1_front_camera(cls) -> CameraCfg:
         """front camera configuration"""
         return CameraBaseCfg.get_camera_config()
+
+    @classmethod
+    def g1_front_camera_left(cls, baseline: float = 0.06) -> CameraCfg:
+        """left-eye head camera configuration for stereo setups"""
+        return CameraBaseCfg.get_camera_config(
+            prim_path="/World/envs/env_.*/Robot/d435_link/front_cam_left",
+            pos_offset=(0.0, 0, 0.0),
+        )
+
+    @classmethod
+    def g1_front_camera_right(cls, baseline: float = 0.06) -> CameraCfg:
+        """right-eye head camera configuration for stereo setups"""
+        return CameraBaseCfg.get_camera_config(
+            prim_path="/World/envs/env_.*/Robot/d435_link/front_cam_right",
+            pos_offset=(0.0, -baseline, 0.0),
+        )
     @classmethod
     def g1_world_camera(cls) -> CameraCfg:
         """front camera configuration"""

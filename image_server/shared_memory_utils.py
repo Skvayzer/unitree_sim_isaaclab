@@ -16,7 +16,8 @@ import struct
 
 # shared memory configuration
 SHM_NAME = "isaac_multi_image_shm"
-SHM_SIZE = 640 * 480 * 3 * 3 + 1024  # the size of the concatenated images + the header information buffer
+# allocate enough space for stereo head (2x width) plus two wrist cameras
+SHM_SIZE = 640 * 480 * 3 * 4 + 1024  # max 4 frames' worth of data + header buffer
 
 # define the simplified header structure
 class SimpleImageHeader(ctypes.Structure):
@@ -76,10 +77,6 @@ class MultiImageWriter:
                     image = images[image_name]
                     if not image.flags['C_CONTIGUOUS']:
                         image = np.ascontiguousarray(image)
-                    
-                    # convert RGB to BGR (OpenCV format)
-                    if image.shape[2] == 3:  # ensure it is a 3-channel image
-                        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
                     
                     frames_to_concat.append(image)
             

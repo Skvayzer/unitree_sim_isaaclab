@@ -38,10 +38,19 @@ def get_camera_image(
     images = {}
     # env.sim.render()
     
-    # Head camera (front camera)
-    if "front_camera" in env.scene.keys():
-        head_image = env.scene["front_camera"].data.output["rgb"][0]  # [batch, height, width, 3]
-        images["head"] = head_image.cpu().numpy()
+    head_sources = []
+    if "front_camera_left" in env.scene.keys():
+        head_sources.append(env.scene["front_camera_left"].data.output["rgb"][0].cpu().numpy())
+    if "front_camera_right" in env.scene.keys():
+        head_sources.append(env.scene["front_camera_right"].data.output["rgb"][0].cpu().numpy())
+
+    # Fallback to single camera when stereo pair doesn't exist
+    if not head_sources and "front_camera" in env.scene.keys():
+        head_sources.append(env.scene["front_camera"].data.output["rgb"][0].cpu().numpy())
+
+    if head_sources:
+        head_image = np.concatenate(head_sources, axis=1) if len(head_sources) > 1 else head_sources[0]
+        images["head"] = head_image
     
     # Left camera (left wrist camera)
     if "left_wrist_camera" in env.scene.keys():
@@ -52,7 +61,7 @@ def get_camera_image(
     if "right_wrist_camera" in env.scene.keys():
         right_image = env.scene["right_wrist_camera"].data.output["rgb"][0]
         images["right"] = right_image.cpu().numpy()
-    
+
     # if no camera with the specified name is found, try other common camera names
     if not images:
         # try to find other possible camera names
@@ -77,4 +86,3 @@ def get_camera_image(
         print("[camera_state] No camera images found in the environment")
     
     return torch.zeros((1, 480, 640, 3))
-
