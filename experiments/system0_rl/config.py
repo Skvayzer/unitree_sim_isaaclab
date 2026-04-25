@@ -15,7 +15,7 @@ class TrainConfig:
     # System 0 MoE
     joint_dim: int = 28
     vel_dim: int = 28
-    tactile_dim: int = 18  # 6 fingertips x 3 axes in sim
+    tactile_dim: int = 16  # 8 pad links x 2 hands, scalar magnitude per link
     torque_dim: int = 28
     target_dim: int = 28
     intent_dim: int = 128  # scripted controller phase encoding

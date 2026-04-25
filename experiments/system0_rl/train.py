@@ -51,6 +51,7 @@ from experiments.system0_rl.system0_moe import System0Config, System0PPOWrapper
 from experiments.system0_rl.scripted_controller import ScriptedController, Phase
 from experiments.system0_rl.rewards import compute_reward
 from experiments.system0_rl.ppo import RolloutBuffer, ppo_update
+from tasks.common_observations.tactile_state import get_tactile_obs
 
 ARM_NAMES = [
     "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
@@ -106,10 +107,9 @@ def build_obs_batch(env, sim_arm, sim_hand, device):
     hand_vel = robot.data.joint_vel[:, sim_hand].to(device)     # (N, 14)
 
     try:
-        forces = env.scene["fingertip_contacts"].data.net_forces_w  # (N, 6, 3)
-        tactile = forces.reshape(N, -1).to(device)[:, :18]
-    except (KeyError, AttributeError):
-        tactile = torch.zeros(N, 18, device=device)
+        tactile = get_tactile_obs(env).to(device)  # (N, 16) — scalar magnitude per pad link
+    except Exception:
+        tactile = torch.zeros(N, config.tactile_dim, device=device)
 
     try:
         arm_t = robot.data.applied_torque[:, sim_arm].to(device)
