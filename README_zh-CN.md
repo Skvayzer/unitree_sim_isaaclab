@@ -29,7 +29,7 @@
 ## 1、 📖 介绍
 该项目基于Isaac Lab 搭建**宇树(Unitree)机器人**在不同任务下的仿真场景，方便进行数据采集、数据回放、数据生成以及模型验证。可以与[xr_teleoperate](https://github.com/unitreerobotics/xr_teleoperate)代码配合进行数据集的采集。该项目采用了与真实机器人一样的DDS通信，以提高代码的通用性和使用的简易性。
 
-目前该项目使用带有夹爪的Unitree G1(G1-29dof-gripper)以及带有三指灵巧手的Unitree G1(G1-29dof-dex3)搭建了不同任务的仿真场景，具体任务场景名称与图示如下表,其中任务名称中带有 `Wholebody`的任务可以进行移动操作：
+目前该项目使用了带有不同执行器的Unitree G1/H1-2机器人，并且搭建了不同任务的仿真场景，具体任务场景名称与图示如下表,其中任务名称中带有 `Wholebody`的任务可以进行移动操作：
 
 
 <table align="center">
@@ -37,6 +37,7 @@
     <th>G1-29dof-gripper</th>
     <th>G1-29dof-dex3</th>
     <th>G1-29dof-inspire</th>
+    <th>H1-2-inspire</th>
   </tr>
   <tr>
     <td align="center">
@@ -54,7 +55,11 @@
       <br/>
       <code>Isaac-PickPlace-Cylinder-G129-Inspire-Joint</code>
     </td>
-
+    <td align="center">
+      <img src="./img/Isaac-PickPlace-Cylinder-H12-27dof-Inspire-Joint.png" width="300" alt="G1-gripper-redblock"/>
+      <br/>
+      <code>Isaac-PickPlace-Cylinder-H12-27dof-Inspire-Joint</code>
+    </td>
   </tr>
   <tr>
     <td align="center">
@@ -71,6 +76,11 @@
       <img src="./img/Isaac-PickPlace-RedBlock-G129-Inspire-Joint.png" width="300" alt="G1-dex3-redblock"/>
       <br/>
       <code>Isaac-PickPlace-RedBlock-G129-Inspire-Joint</code>
+    </td>
+    <td align="center">
+      <img src="./img/Isaac-PickPlace-RedBlock-H12-27dof-Inspire-Joint.png" width="300" alt="G1-dex3-redblock"/>
+      <br/>
+      <code>Isaac-PickPlace-RedBlock-H12-27dof-Inspire-Joint</code>
     </td>
   </tr>
   <tr>
@@ -89,9 +99,13 @@
       <br/>
       <code>Isaac-Stack-RgyBlock-G129-Inspire-Joint</code>
     </td>
+    <td align="center">
+      <img src="./img/Isaac-Stack-RgyBlock-H12-27dof-Inspire-Joint.png" width="300" alt="G1-dex3-redblock"/>
+      <br/>
+      <code> Isaac-Stack-RgyBlock-H12-27dof-Inspire-Joint</code>
+    </td>
   </tr>
-
-  <tr>
+    <tr>
     <td align="center">
       <img src="./img/Isaac-Move-Cylinder-G129-Dex1-Wholebody.png" width="300" alt="G1-gripper-redblock"/>
       <br/>
@@ -111,18 +125,60 @@
 </table>
 
 ## 2、⚙️ 环境配置与运行
-该项目需要安装Isaac Sim 4.5.0/Isaac Sim 5.0.0以及Isaac Lab，具体安装可参考[官方教程](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html).或者按照下面流程进行安装。Ubuntu 20.4与Ubuntu 22.4以及以上版本安装方式不同，请根据自己的系统版本以及显卡资源进行安装。
+该项目需要安装Isaac Sim 4.5.0/Isaac Sim 5.x.0以及Isaac Lab，具体安装可参考[官方教程](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html).或者按照下面流程进行安装。Ubuntu 20.4与Ubuntu 22.4以及以上版本安装方式不同，请根据自己的系统版本以及显卡资源进行安装。
 
-### 2.1 Isaac Sim 4.5.0相关环境安装（RTX4080以下推荐安装）
+### 2.1 Isaac Sim 4.5.0相关环境安装
 
+环境的安装可以采用下面两种方式进行：
+
+- 使用 `auto_setup_env.sh` 脚本进行自动安装
+```
+chmod +x auto_setup_env.sh
+bash auto_setup_env.sh 4.5 unitree_sim_env
+```
+
+- 参考下面文档进行安装 
+  
 请参考<a href="doc/isaacsim4.5_install_zh.md"> isaacsim 4.5.0 环境安装步骤 </a> 进行环境安装
 
-### 2.2 Isaac Sim 5.0.0相关环境安装（RTX4080以及以上推荐安装）
-请参考<a href="doc/isaacsim5.0_install_zh.md"> isaacsim 5.0.0 环境安装步骤 </a> 进行环境安装
+### 2.2 Isaac Sim 5.0.0/5.1.0相关环境安装
+环境的安装可以采用下面两种方式进行：
 
-### 2.3 运行程序
+- 使用 `auto_setup_env.sh` 脚本进行自动安装
+```
+chmod +x auto_setup_env.sh
+bash auto_setup_env.sh 5.0 unitree_sim_env 
+或者 
+bash auto_setup_env.sh 5.1 unitree_sim_env
+```
+- 参考下面文档进行安装 
 
-#### 2.3.1 资产下载
+请参考<a href="doc/isaacsim5.0_install_zh.md"> isaacsim 5.0.0 环境安装步骤 </a> ，<a href="doc/isaacsim5.1_install_zh.md"> isaacsim 5.1.0 环境安装步骤 </a> 进行环境安装
+
+**推荐：** 使用`auto_setup_env.sh`脚本进行自动安装环境与资产下载。
+
+### 2.3 构建docker环境（使用的是Ubuntu22.04/IsaacSim 5.1）
+#### 2.3.1 构建docker
+```bash
+sudo docker pull nvidia/cuda:12.2.0-runtime-ubuntu22.04
+cd   unitree_sim_isaaclab
+sudo docker build   --build-arg http_proxy=http://10.0.7.226:7890   --build-arg https_proxy=http://10.0.7.226:7890    -t unitree-sim:latest -f Dockerfile .
+#  如果需要使用代理请填写- -build-arg http_proxy=http://127.0.0.1:7890   --build-arg https_proxy=http://127.0.0.1:7890
+
+```
+#### 2.3.2 进入docker
+
+```shell
+xhost +local:docker
+
+sudo docker run --gpus all -it --rm   --network host   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video,graphics,display   -e LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH   -e DISPLAY=$DISPLAY   -e VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json   -v /etc/vulkan/icd.d:/etc/vulkan/icd.d:ro   -v /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro   -v /tmp/.X11-unix:/tmp/.X11-unix:rw   -v /home/unitree/newDisk/unitree_sim_isaaclab_usds:/home/code/isaacsim_assets   unitree-sim /bin/bash
+
+#其中 -v /home/unitree/newDisk/unitree_sim_isaaclab_usds:/home/code/isaacsim_assets 是把宿主机中的unitree_sim_isaaclab_usds目录映射到docker容器的isaacsim_assets中，方便进行数据的共享，请根据自己情况修改。
+
+```
+### 2.4 运行程序
+
+#### 2.4.1 资产下载
 
 使用下面的命令下载需要的资产文件
 
@@ -134,44 +190,47 @@ sudo apt install git-lfs
 . fetch_assets.sh
 ```
 
-#### 2.3.2 遥操作
+#### 2.4.2 遥操作
 
 ```
 python sim_main.py --device cpu  --enable_cameras  --task  Isaac-PickPlace-Cylinder-G129-Dex1-Joint    --enable_dex1_dds --robot_type g129
 ```
 
-- --task: 任务名称，对应上表中的任务名称
-- --enable_dex1_dds/--enable_dex3_dds: 分别代表启用二指夹爪/三指灵巧手的dds
-- --robot_type: 机器人类型，目前有29自由度的unitree g1(g129)
+- `--task:` 任务名称，对应上表中的任务名称
+- `--enable_dex1_dds/--enable_dex3_dds:` 分别代表启用二指夹爪/三指灵巧手的dds
+- `--robot_type:` 机器人类型，目前有29自由度的unitree g1(g129),27自由度的H1-2
+- `--no_render:` 不启动Sim窗口下运行并且开启WebRTC视频流, 如果使用Docker环境进行运行请添加此参数; 可以使用isaacsim-webrtc-streaming-client进行查看画面
 
-**注意:** 如需要控制机器人移动，请参考`send_commands_8bit.py` 或者 `send_commands_keyboard.py` 发布控制命令，也可以直接使用。但是请注意只有带有`Wholebody`标识的才是移动型任务，才能控制机器人移动。
+**注意 1:** 如需要控制机器人移动，请参考`send_commands_8bit.py` 或者 `send_commands_keyboard.py` 发布控制命令，也可以直接使用。但是请注意只有带有`Wholebody`标识的才是移动型任务，才能控制机器人移动。
 
-#### 2.3.3 数据回放
+**注意 2:** isaacsim-webrtc-streaming-client 是isaacsim提供的一个用于查看Sim窗口画面的工具，具体安装和使用可参考[官方教程](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/manual_livestream_clients.html).
+
+#### 2.4.3 数据回放
 
 ```
 python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G129-Dex1-Joint     --enable_dex1_dds --robot_type g129 --replay  --file_path "/home/unitree/Code/xr_teleoperate/teleop/utils/data" 
 ```
-- --replay: 用于判断是否进行数据回放
-- --file_path: 数据集存放的目录(请修改自己的数据集路径)。
+- `--replay:` 用于判断是否进行数据回放
+- `--file_path:` 数据集存放的目录(请修改自己的数据集路径)。
 
 **注意：** 这里使用的数据集存放格式是与[xr_teleoperate](https://github.com/unitreerobotics/xr_teleoperate)遥操作录制的数据集格式一致。
 
 **注意:** 针对任务离散的Reward可以使用 'get_step_reward_value' 函数获取
-#### 2.3.4 数据生成
+#### 2.4.4 数据生成
 通过在数据回放过程中调整光照条件和相机参数，并重新采集图像数据，可用于生成具有多样化视觉特征的增强数据，从而提升模型的泛化能力。
 
 ```
  python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G129-Dex1-Joint     --enable_dex1_dds --robot_type g129 --replay  --file_path "/home/unitree/Code/xr_teleoperate/teleop/utils/data" --generate_data --generate_data_dir "./data2"
 ```
-- --generate_data: 是否生成新的数据
-- --generate_data_dir: 新数据存放的路径
-- --rerun_log: 是否开启数据录制日志
-- --modify_light: 是否修改光照条件(这个需要自己根据需求修改main函数中update_light的参数)
-- --modify_camera: 是否修改相机参数(这个需要自己根据需求修改main函数中batch_augment_cameras_by_name参数)
+- `--generate_data:` 是否生成新的数据
+- `--generate_data_dir:` 新数据存放的路径
+- `--rerun_log:` 是否开启数据录制日志
+- `--modify_light:` 是否修改光照条件(这个需要自己根据需求修改main函数中update_light的参数)
+- `--modify_camera:` 是否修改相机参数(这个需要自己根据需求修改main函数中batch_augment_cameras_by_name参数)
 
 **注意:** 如需要修改光照条件或者相机参数，请修改需要的参数并且测试后再进行大量生成。
 
-
+**注意：** 如果使用sim和xr_teleoperate配合进行数据采集，需要修改xr_teleoperate中关于image_server的IP地址为sim启动的IP地址。
 
 
 ## 3、任务场景搭建

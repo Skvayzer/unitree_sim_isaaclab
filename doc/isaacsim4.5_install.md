@@ -1,5 +1,26 @@
 ## Isaac Sim 4.5.0 Environment Installation
-### 2.1 Installation on Ubuntu 22.04 and Later(pip install)
+
+### 2.1 Clone the unitree_sim_isaaclab Repository
+1. Clone the unitree_sim_isaaclab repository:
+```
+git clone git@github.com:unitreerobotics/unitree_sim_isaaclab.git
+```
+2. Initialize and clone the submodules:
+```
+cd unitree_sim_isaaclab
+git submodule update --init --depth 1
+```
+3. Modify the teleimager configuration file (cam_config_server.yaml)
+
+Update the corresponding keys in cam_config_server.yaml as follows:
+
+```
+image_shape: [480, 640]
+type: isaacsim
+```
+Please refer to the teleimager[README.md](https://github.com/unitreerobotics/teleimager/blob/main/README.md)for detailed configuration instructions and environment setup.
+
+### 2.2 Installation on Ubuntu 22.04 and Later(pip install)
 
 - **Create Virtual Environment**
 
@@ -62,9 +83,13 @@ pip3 install -e .
 - **Install other dependencies**
 ```
 pip install -r requirements.txt
+
+cd teleimager
+
+pip install -e .
 ```
 
-### 2.2 Installation on Ubuntu 20.04(binary install)
+### 2.3 Installation on Ubuntu 20.04(binary install)
 
 - **Download Isaac Sim Binary**
 

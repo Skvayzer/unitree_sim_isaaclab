@@ -16,6 +16,19 @@ if TYPE_CHECKING:
 
 import torch
 
+
+_obs_cache = {
+    "device": None,
+    "batch": None,
+    "gripper_idx_t": None,
+    "gripper_idx_batch": None,
+    "pos_buf": None,
+    "vel_buf": None,
+    "torque_buf": None,
+    "dds_last_ms": 0,
+    "dds_min_interval_ms": 20,
+}
+
 def get_robot_girl_joint_names() -> list[str]:
     return [
         "right_hand_Joint1_1",
@@ -84,28 +97,53 @@ def get_robot_gipper_joint_states(
     joint_pos = env.scene["robot"].data.joint_pos
     joint_vel = env.scene["robot"].data.joint_vel  
     joint_torque = env.scene["robot"].data.applied_torque
+    device = joint_pos.device
+    batch = joint_pos.shape[0]
     
-    # get the gripper joint indices (last 2 joints)
-    # gripper_joint_names = get_robot_girl_joint_names()
-    # all_joint_names = env.scene["robot"].data.joint_names
-    # gripper_joint_indices = [all_joint_names.index(name) for name in gripper_joint_names if name in all_joint_names]
-    # print(f"gripper_joint_indices: {gripper_joint_indices}")
-    gripper_joint_indices = [31, 29]
-    if len(gripper_joint_indices) >= 2:
-        # extract the gripper joint states in the specified order
-        gripper_positions = joint_pos[:, gripper_joint_indices]
-        gripper_velocities = joint_vel[:, gripper_joint_indices]  
-        gripper_torques = joint_torque[:, gripper_joint_indices]
-        
-        # publish to DDS (only publish the data of the first environment)
-        if enable_dds and len(gripper_positions) > 0:
-            try:
 
+    global _obs_cache
+    if _obs_cache["device"] != device or _obs_cache["gripper_idx_t"] is None:
+        gripper_joint_indices = [31, 29]
+        _obs_cache["gripper_idx_t"] = torch.tensor(gripper_joint_indices, dtype=torch.long, device=device)
+        _obs_cache["device"] = device
+        _obs_cache["batch"] = None
+    idx_t = _obs_cache["gripper_idx_t"]
+    n = idx_t.numel()
+
+
+    if _obs_cache["batch"] != batch or _obs_cache["gripper_idx_batch"] is None:
+        _obs_cache["gripper_idx_batch"] = idx_t.unsqueeze(0).expand(batch, n)
+        _obs_cache["pos_buf"] = torch.empty(batch, n, device=device, dtype=joint_pos.dtype)
+        _obs_cache["vel_buf"] = torch.empty(batch, n, device=device, dtype=joint_pos.dtype)
+        _obs_cache["torque_buf"] = torch.empty(batch, n, device=device, dtype=joint_pos.dtype)
+        _obs_cache["batch"] = batch
+
+    idx_batch = _obs_cache["gripper_idx_batch"]
+    pos_buf = _obs_cache["pos_buf"]
+    vel_buf = _obs_cache["vel_buf"]
+    torque_buf = _obs_cache["torque_buf"]
+
+
+    try:
+        torch.gather(joint_pos, 1, idx_batch, out=pos_buf)
+        torch.gather(joint_vel, 1, idx_batch, out=vel_buf)
+        torch.gather(joint_torque, 1, idx_batch, out=torque_buf)
+    except TypeError:
+        pos_buf.copy_(torch.gather(joint_pos, 1, idx_batch))
+        vel_buf.copy_(torch.gather(joint_vel, 1, idx_batch))
+        torque_buf.copy_(torch.gather(joint_torque, 1, idx_batch))
+    
+    # publish to DDS (only publish the data of the first environment)
+    if enable_dds and len(pos_buf) > 0:
+        try:
+            import time
+            now_ms = int(time.time() * 1000)
+            if now_ms - _obs_cache["dds_last_ms"] >= _obs_cache["dds_min_interval_ms"]:
                 gripper_dds = _get_gripper_dds_instance()
                 if gripper_dds:
-                    pos = gripper_positions[0].cpu().numpy()
-                    vel = gripper_velocities[0].cpu().numpy()
-                    torque = gripper_torques[0].cpu().numpy()
+                    pos = pos_buf[0].contiguous().cpu().numpy()
+                    vel = vel_buf[0].contiguous().cpu().numpy()
+                    torque = torque_buf[0].contiguous().cpu().numpy()
                     right_pos = pos[:1]
                     left_pos = pos[1:]
                     right_vel = vel[:1]
@@ -114,13 +152,9 @@ def get_robot_gipper_joint_states(
                     left_torque = torque[1:]
                     # write the gripper state to shared memory
                     gripper_dds.write_gripper_state(left_pos, left_vel, left_torque, right_pos, right_vel, right_torque)
-            except Exception as e:
-                print(f"[gripper_state] Failed to write to shared memory: {e}")
-        
-        return gripper_positions
-    else:
-        # if the gripper joints are not found, return a zero tensor
-        # print(f"[gripper_state] Warning: no gripper joints found, expected: {gripper_joint_names}, available: {all_joint_names}")
-        print(f"[gripper_state] Warning: no gripper joints found")
-        return torch.zeros((joint_pos.shape[0], 2))
+                    _obs_cache["dds_last_ms"] = now_ms
+        except Exception as e:
+            print(f"[gripper_state] Failed to write to shared memory: {e}")
+    
+    return pos_buf
 

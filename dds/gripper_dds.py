@@ -11,7 +11,7 @@ from dds.dds_base import DDSObject
 from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorCmds_, MotorStates_
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__MotorCmd_, unitree_go_msg_dds__MotorState_
-
+from tools.data_convert import convert_to_joint_range, convert_to_gripper_range
 
 class GripperDDS(DDSObject):
     """Gripper DDS communication class - singleton pattern
@@ -38,7 +38,7 @@ class GripperDDS(DDSObject):
             self.left_gripper_state.states.append(motor_state)
             self.right_gripper_state.states.append(motor_state)
         self._initialized = True
-        
+        self.existing_data = {"left_gripper_cmd": {}, "right_gripper_cmd": {}}
         # setup the shared memory
         self.setup_shared_memory(
             input_shm_name="isaac_gripper_state",  # read the state of the gripper from Isaac Lab
@@ -84,9 +84,9 @@ class GripperDDS(DDSObject):
             data = self._process_subscribe_data(msg, hand_side)
             if data and self.output_shm:
                 # write to shared memory
-                existing_data = self.output_shm.read_data() or {}
-                existing_data[f"{hand_side}_gripper_cmd"] = data
-                self.output_shm.write_data(existing_data)
+                
+                self.existing_data[f"{hand_side}_gripper_cmd"] = data
+                self.output_shm.write_data(self.existing_data)
         except Exception as e:
             print(f"gripper_dds [{self.node_name}] Error processing subscribe message: {e}")
     def dds_publisher(self) -> Any:
@@ -128,7 +128,7 @@ class GripperDDS(DDSObject):
                 torques = gripper_data["torques"]
                 for i in range(min(1, len(positions))):  # at most 2 grippers
                     if i < len(positions):
-                        gripper_state.states[i].q = self.convert_to_gripper_range(float(positions[i]))
+                        gripper_state.states[i].q = convert_to_gripper_range(float(positions[i]))
                     if i < len(velocities):
                         gripper_state.states[i].dq = float(velocities[i])
                     if i < len(torques):
@@ -159,7 +159,7 @@ class GripperDDS(DDSObject):
             # process the gripper command (at most 2 grippers)
             for i in range(min(1, len(msg.cmds))):
                 # convert the gripper control value to the Isaac Lab joint angle
-                joint_angle = self.convert_to_joint_range(float(msg.cmds[i].q))
+                joint_angle = convert_to_joint_range(float(msg.cmds[i].q))
                 
                 cmd_data["positions"].append(joint_angle)
                 cmd_data["velocities"].append(float(msg.cmds[i].dq))
@@ -234,60 +234,4 @@ class GripperDDS(DDSObject):
                 
         except Exception as e:
             print(f"dex3_dds [{self.node_name}] Error publishing hand states: {e}")
-    def convert_to_joint_range(self, value):
-        """Convert the command value to the Isaac Lab joint angle [5.6, 0] -> [-0.02, 0.03]
-        
-        Args:
-            value: the input value, range in [5.6, 0]
-                  5.6: fully open
-                  0.0: fully closed
-            
-        Returns:
-            float: the converted value, range in [-0.02, 0.03]
-                  -0.02: fully open
-                  0.03: fully closed
-        """
-        # input range (gripper control value)
-        input_min = 0.0    # fully closed
-        input_max = 5.6    # fully open
-        
-        # output range (joint angle)
-        output_min = 0.03  # fully closed
-        output_max = -0.02 # fully open
-        
-        # ensure the input value is in the valid range
-        value = max(input_min, min(input_max, value))
-        
-        # linear mapping conversion
-        converted_value = output_min + (output_max - output_min) * (value - input_min) / (input_max - input_min)
-        
-        return converted_value
 
-    def convert_to_gripper_range(self, value):
-        """Convert the Isaac Lab joint angle to the gripper control value [-0.02, 0.03] -> [5.6, 0]
-        
-        Args:
-            value: the input value, range in [-0.02, 0.03]
-                  -0.02: fully open
-                  0.03: fully closed
-            
-        Returns:
-            float: the converted value, range in [5.6, 0]
-                  5.6: fully open
-                  0.0: fully closed
-        """
-        # input range (joint angle)
-        input_min = 0.03   # fully closed
-        input_max = -0.02  # fully open
-        
-        # output range (gripper control value)
-        output_min = 0.0   # fully closed
-        output_max = 5.6   # fully open
-        
-        # ensure the input value is in the valid range
-        value = max(input_max, min(input_min, value))
-        
-        # linear mapping conversion
-        converted_value = output_min + (output_max - output_min) * (input_min - value) / (input_min - input_max)
-        
-        return converted_value

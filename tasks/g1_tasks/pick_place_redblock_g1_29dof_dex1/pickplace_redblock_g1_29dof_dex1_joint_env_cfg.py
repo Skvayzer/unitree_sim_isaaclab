@@ -75,7 +75,7 @@ class ObservationsCfg:
         # 2. gripper joint state observation 
         robot_gipper_state = ObsTerm(func=mdp.get_robot_gipper_joint_states)
 
-        # 3. camera image observation
+        # # 3. camera image observation
         camera_image = ObsTerm(func=mdp.get_camera_image)
 
         def __post_init__(self):
@@ -141,7 +141,7 @@ class PickPlaceG129DEX1BaseFixEnvCfg(ManagerBasedRLEnvCfg):
     curriculum = None # curriculum manager
     def __post_init__(self):
         """Post initialization."""
-        self.decimation = 4
+        self.decimation = 2
         self.episode_length_s = 20.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation

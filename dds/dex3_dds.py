@@ -41,7 +41,7 @@ class Dex3DDS(DDSObject):
         self.right_cmd_subscriber = None
         
         self._initialized = True
-        
+        self.existing_data = {"left_hand_cmd": {}, "right_hand_cmd": {}}
         # setup shared memory
         self.setup_shared_memory(
             input_shm_name="isaac_dex3_state",  # read the state of the hand from Isaac Lab
@@ -75,13 +75,13 @@ class Dex3DDS(DDSObject):
             # left hand command subscriber
             self.left_cmd_subscriber = ChannelSubscriber("rt/dex3/left/cmd", HandCmd_)
             self.left_cmd_subscriber.Init(
-                lambda msg: self.dds_subscriber(msg, "left"), 1
+                lambda msg: self.dds_subscriber(msg, "left"), 32
             )
             
             # right hand command subscriber
             self.right_cmd_subscriber = ChannelSubscriber("rt/dex3/right/cmd", HandCmd_)
             self.right_cmd_subscriber.Init(
-                lambda msg: self.dds_subscriber(msg, "right"), 1
+                lambda msg: self.dds_subscriber(msg, "right"), 32
             )
             
             print(f"[{self.node_name}] Hand command subscriber initialized")
@@ -96,10 +96,9 @@ class Dex3DDS(DDSObject):
             # process the command of the hand and write to the shared memory
             cmd_data = self.process_hand_command(msg, datatype)
             if cmd_data and self.output_shm:
-                # read the existing data or create new data
-                existing_data = self.output_shm.read_data() or {}
-                existing_data[f"{datatype}_hand_cmd"] = cmd_data
-                self.output_shm.write_data(existing_data)
+                # write to shared memory
+                self.existing_data[f"{datatype}_hand_cmd"] = cmd_data
+                self.output_shm.write_data(self.existing_data)
         except Exception as e:
             print(f"dex3_dds [{self.node_name}] Error handling {datatype} hand command: {e}")
     

@@ -66,7 +66,7 @@ class InspireDDS(DDSObject):
         """Setup the subscriber of the gripper"""
         try:
             self.subscriber = ChannelSubscriber("rt/inspire/cmd", MotorCmds_)
-            self.subscriber.Init(lambda msg: self.dds_subscriber(msg, ""), 1)
+            self.subscriber.Init(lambda msg: self.dds_subscriber(msg, ""), 32)
             
             print(f"[{self.node_name}] Inspire Hand command subscriber initialized")
             return True

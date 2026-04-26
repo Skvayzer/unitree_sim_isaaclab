@@ -23,7 +23,7 @@ if __name__ == "__main__":
     publisher = ChannelPublisher("rt/reset_pose/cmd", String_)
     publisher.Init()
 
-    for cat in [2]:
+    for cat in [1]:
         publish_reset_category(cat,publisher)
         time.sleep(1)  # wait for 1 second
     print("test publish completed")

@@ -46,7 +46,7 @@ class TableRedBlockSceneCfg(InteractiveSceneCfg): # inherit from the interactive
     object = RigidObjectCfg(
         prim_path="/World/envs/env_.*/Object",
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=[-4.15, -4.05, 0.84],
+            pos=[-4.25, -4.03, 0.84],
             rot=[1, 0, 0, 0]
         ),
         spawn=sim_utils.CuboidCfg(
@@ -84,11 +84,11 @@ class TableRedBlockSceneCfg(InteractiveSceneCfg): # inherit from the interactive
 
     # Lights
     # 4. light configuration
-    light = AssetBaseCfg(
-        prim_path="/World/light",   # light in the scene
-        spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), # light color (white)
-                                     intensity=3000.0),    # light intensity
-    )
+    # light = AssetBaseCfg(
+    #     prim_path="/World/light",   # light in the scene
+    #     spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), # light color (white)
+    #                                  intensity=3000.0),    # light intensity
+    # )
 
 
 

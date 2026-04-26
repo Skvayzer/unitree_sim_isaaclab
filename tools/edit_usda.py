@@ -30,8 +30,8 @@ def modify_instanceable_flag(file_path):
             modified_lines.append(line)
 
     # 保存修改后的内容
-    with open('/home/unitree/newDisk/URDF/wholevody_with_inspire/demo2.usda', 'w', encoding='utf-8') as f:
+    with open('/home/unitree/newDisk/URDF/urdf-to-usd/h1_2_inspire/h1_2_demo2.usda', 'w', encoding='utf-8') as f:
         f.writelines(modified_lines)
 
 # 使用方法
-modify_instanceable_flag('/home/unitree/newDisk/URDF/wholevody_with_inspire/demo.usda')  # 替换为你的实际文件路径
+modify_instanceable_flag('/home/unitree/newDisk/URDF/urdf-to-usd/h1_2_inspire/demo.usda')  # 替换为你的实际文件路径

@@ -3,13 +3,14 @@
 提供可复用的机器人和相机配置
 """
 
-from .robot_configs import G129dofRobotBaseCfg, G1RobotPresets, G1RobotJointTemplates
+from .robot_configs import RobotBaseCfg, H12RobotPresets, RobotJointTemplates,G1RobotPresets
 from .camera_configs import CameraBaseCfg, CameraPresets
 
 __all__ = [
-    "G129dofRobotBaseCfg",
+    "RobotBaseCfg",
     "G1RobotPresets",
-    "G1RobotJointTemplates", 
+    "H12RobotPresets",
+    "RobotJointTemplates", 
     "CameraBaseCfg",
     "CameraPresets"
 ] 

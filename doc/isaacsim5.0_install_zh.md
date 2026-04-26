@@ -1,5 +1,26 @@
 ## Isaac Sim 5.0.0环境安装
-### 2.1 Ubuntu 22.04 以及以上的安装(pip install)
+
+
+### 2.1 克隆unitree_sim_isaaclab仓库
+1. 克隆unitree_sim_isaaclab仓库
+```
+git clone git@github.com:unitreerobotics/unitree_sim_isaaclab.git
+```
+2. 克隆子项目
+```
+cd unitree_sim_isaaclab
+git submodule update --init --depth 1
+```
+3. 修改teleimager配置文件(cam_config_server.yaml)
+
+按照下面的内容修改 cam_config_server.yaml中的对应的key
+```
+image_shape: [480, 640]
+type: isaacsim
+```
+请参考teleimager的[README.md](https://github.com/unitreerobotics/teleimager/blob/main/README.md)进行配置以及环境安装
+
+### 2.2 Ubuntu 22.04 以及以上的安装(pip install)
 
 -  创建虚拟环境
 
@@ -66,7 +87,7 @@ pip3 install -e .
 pip install -r requirements.txt
 ```
 
-### 2.2 Ubuntu 20.4安装(二进制安装)
+### 2.3 Ubuntu 20.4安装(二进制安装)
 
 - 下载二进制的Isaaac Sim
 
@@ -134,6 +155,10 @@ pip3 install -e .
 
 ```
 pip install -r requirements.txt
+
+cd teleimager
+
+pip install -e .
 
 ```
 

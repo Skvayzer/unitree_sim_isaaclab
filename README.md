@@ -28,14 +28,14 @@
 
 This project is built on **Isaac Lab** to simulate **Unitree robots** in various tasks, facilitating data collection, playback, generation, and model validation. It can be used in conjunction with the [xr_teleoperate](https://github.com/unitreerobotics/xr_teleoperate) repository for dataset collection. The project adopts the same DDS communication protocol as the real robot to enhance code generality and ease of use.
 
-
-Currently, this project uses Unitree G1 with gripper (G1-29dof-gripper) and Unitree G1 with three-finger dexterous hand (G1-29dof-dex3) to build simulation scenarios for different tasks. The specific task scene names and illustrations are shown in the table below. Tasks with `Wholebody` in their names can perform movement operations:
+Currently, the project employs Unitree G1/H1-2 robots equipped with different actuators, and provides simulation scenarios for multiple tasks. The task names and corresponding illustrations are summarized in the table below. Tasks that include `Wholebody` in their names enable mobile operations.
 
 <table align="center">
   <tr>
     <th>G1-29dof-gripper</th>
     <th>G1-29dof-dex3</th>
     <th>G1-29dof-inspire</th>
+    <th>H1-2-inspire</th>
   </tr>
   <tr>
     <td align="center">
@@ -52,6 +52,11 @@ Currently, this project uses Unitree G1 with gripper (G1-29dof-gripper) and Unit
       <img src="./img/Isaac-PickPlace-Cylinder-G129-Inspire-Joint.png" width="300" alt="G1-dex3-cylinder"/>
       <br/>
       <code>Isaac-PickPlace-Cylinder-G129-Inspire-Joint</code>
+    </td>
+    <td align="center">
+      <img src="./img/Isaac-PickPlace-Cylinder-H12-27dof-Inspire-Joint.png" width="300" alt="G1-gripper-redblock"/>
+      <br/>
+      <code>Isaac-PickPlace-Cylinder-H12-27dof-Inspire-Joint</code>
     </td>
   </tr>
   <tr>
@@ -70,6 +75,11 @@ Currently, this project uses Unitree G1 with gripper (G1-29dof-gripper) and Unit
       <br/>
       <code>Isaac-PickPlace-RedBlock-G129-Inspire-Joint</code>
     </td>
+    <td align="center">
+      <img src="./img/Isaac-PickPlace-RedBlock-H12-27dof-Inspire-Joint.png" width="300" alt="G1-dex3-redblock"/>
+      <br/>
+      <code>Isaac-PickPlace-RedBlock-H12-27dof-Inspire-Joint</code>
+    </td>
   </tr>
   <tr>
     <td align="center">
@@ -86,6 +96,11 @@ Currently, this project uses Unitree G1 with gripper (G1-29dof-gripper) and Unit
       <img src="./img/Isaac-Stack-RgyBlock-G129-Inspire-Joint.png" width="300" alt="G1-dex3-redblock"/>
       <br/>
       <code>Isaac-Stack-RgyBlock-G129-Inspire-Joint</code>
+    </td>
+    <td align="center">
+      <img src="./img/Isaac-Stack-RgyBlock-H12-27dof-Inspire-Joint.png" width="300" alt="G1-dex3-redblock"/>
+      <br/>
+      <code> Isaac-Stack-RgyBlock-H12-27dof-Inspire-Joint</code>
     </td>
   </tr>
     <tr>
@@ -109,20 +124,66 @@ Currently, this project uses Unitree G1 with gripper (G1-29dof-gripper) and Unit
 
 ## 2、⚙️ Environment Setup and Running
 
-This project requires Isaac Sim 4.5.0/Isaac Sim 5.0.0 and Isaac Lab. You can refer to the [official installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html)  or follow the steps below. The installation methods for Ubuntu 20.04 and Ubuntu 22.04 (and later versions) are different. Please choose the installation method based on your system version and GPU resources.
+This project requires Isaac Sim 4.5.0/Isaac Sim 5.x.0 and Isaac Lab. You can refer to the [official installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html)  or follow the steps below. The installation methods for Ubuntu 20.04 and Ubuntu 22.04 (and later versions) are different. Please choose the installation method based on your system version and GPU resources.
 
-### 2.1 Isaac Sim 4.5.0 Environment Installation (Recommended for RTX 4080 and below)
+### 2.1 Isaac Sim 4.5.0 Environment Installation
+
+The environment can be installed using one of the following two methods:
+- Use the `auto_setup_env.sh` script for automatic installation.
+
+```
+chmod +x auto_setup_env.sh
+bash auto_setup_env.sh 4.5 unitree_sim_env
+```
+- Follow the documentation below for installation.
 
 Please refer to the <a href="doc/isaacsim4.5_install.md">Isaac Sim 4.5.0 Environment Installation Steps</a> for the setup.
 
-### 2.2 Isaac Sim 5.0.0 Environment Installation (Recommended for RTX 4080 and above)
+### 2.2 Isaac Sim 5.0.0/5.1.0 Environment Installation
 
-Please refer to the <a href="doc/isaacsim5.0_install.md">Isaac Sim 5.0.0 Environment Installation Steps</a> for the setup.
+The environment can be installed using one of the following two methods:
+- Use the `auto_setup_env.sh` script for automatic installation.
 
+```
+chmod +x auto_setup_env.sh
+bash auto_setup_env.sh 5.0 unitree_sim_env 
+or 
+bash auto_setup_env.sh 5.1 unitree_sim_env
+```
+- Follow the documentation below for installation.
 
-### 2.3 Run Program
+Please refer to the <a href="doc/isaacsim5.0_install.md">Isaac Sim 5.0.0 Environment Installation Steps</a>， <a href="doc/isaacsim5.1_install.md">Isaac Sim 5.1.0 Environment Installation Steps</a> for the setup.
 
-#### 2.3.1 Asset Download
+**Recommended:** Use the `auto_setup_env.sh` script to automatically install the environment and download the required assets.
+
+### 2.3 Build the Docker Environment (Using Ubuntu 22.04 / IsaacSim 5.1)
+
+#### 2.3.1 Build the Docker environment
+```shell
+sudo docker pull nvidia/cuda:12.2.0-runtime-ubuntu22.04
+cd unitree_sim_isaaclab
+sudo docker build \
+  --build-arg http_proxy=http://127.0.0.1:7890 \
+  --build-arg https_proxy=http://127.0.0.1:7890 \
+  -t unitree-sim:latest -f Dockerfile .
+
+# If you need to use a proxy, please fill in
+# --build-arg http_proxy=http://127.0.0.1:7890 --build-arg https_proxy=http://127.0.0.1:7890
+```
+
+#### 2.3.2 Enter the Docker environment
+
+```shell
+xhost +local:docker
+
+sudo docker run --gpus all -it --rm   --network host   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video,graphics,display   -e LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH   -e DISPLAY=$DISPLAY   -e VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json   -v /etc/vulkan/icd.d:/etc/vulkan/icd.d:ro   -v /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro   -v /tmp/.X11-unix:/tmp/.X11-unix:rw   -v /home/unitree/newDisk/unitree_sim_isaaclab_usds:/home/code/isaacsim_assets   unitree-sim /bin/bash
+
+# The option `-v /home/unitree/newDisk/unitree_sim_isaaclab_usds:/home/code/isaacsim_assets` maps the `unitree_sim_isaaclab_usds` directory on the host machine to `isaacsim_assets` inside the Docker container, making it convenient to share data between the host and the container. Please modify it according to your own setup.
+```
+
+### 2.4 Run Program
+
+#### 2.4.1 Asset Download
 
 Use the following command to download the required asset files
 
@@ -134,26 +195,31 @@ sudo apt install git-lfs
 . fetch_assets.sh
 ```
 
-#### 2.3.2 Teleoperation
+#### 2.4.2 Teleoperation
 
 ```
 python sim_main.py --device cpu  --enable_cameras  --task  Isaac-PickPlace-Cylinder-G129-Dex1-Joint    --enable_dex1_dds --robot_type g129
 ```
 
-- --task: Task name, corresponding to the task names in the table above
-- --enable_dex1_dds/--enable_dex3_dds: Represent enabling DDS for two-finger gripper/three-finger dexterous hand respectively  
-- --robot_type: Robot type, currently has 29-DOF unitree g1 (g129)
+- `--task`: Task name, corresponding to the task names in the table above
+- `--enable_dex1_dds/--enable_dex3_dds`: Represent enabling DDS for two-finger gripper/three-finger dexterous hand respectively  
+- `--robot_type`: Robot type, currently has 29-DOF unitree g1 (g129),27-DoF H1-2
+- `--no_render`: Run without launching the Sim window and enable the WebRTC video stream. If running in a Docker environment, please add this parameter. You can use the Isaac Sim WebRTC Streaming Client to view the video feed.
+.
 
-**Note:** If you need to control robot movement, please refer to `send_commands_8bit.py` or `send_commands_keyboard.py` to publish control commands, or you can use them directly. Please note that only tasks marked with `Wholebody` are mobile tasks and can control the robot's movement.
+**Note 1:** If you need to control robot movement, please refer to `send_commands_8bit.py` or `send_commands_keyboard.py` to publish control commands, or you can use them directly. Please note that only tasks marked with `Wholebody` are mobile tasks and can control the robot's movement.
 
-#### 2.3.3 Data Replay
+**Note 2:** The Isaac Sim WebRTC Streaming Client is a tool provided by NVIDIA Isaac Sim for viewing the Sim window remotely. For installation and usage details, please refer to the 
+[official documentation](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/installation/manual_livestream_clients.html)
+
+#### 2.4.3 Data Replay
 
 ```
 python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G129-Dex1-Joint     --enable_dex1_dds --robot_type g129 --replay  --file_path "/home/unitree/Code/xr_teleoperate/teleop/utils/data" 
 ```
-- --replay: Specifies whether to perform data replay.
+- `--replay:` Specifies whether to perform data replay.
 
-- --file_path: Directory where the dataset is stored (please update this to your own dataset path).
+- `--file_path:` Directory where the dataset is stored (please update this to your own dataset path).
 
 
 **Note:** The dataset format used here is consistent with the one recorded via teleoperation in [xr_teleoperate](https://github.com/unitreerobotics/xr_teleoperate) .
@@ -161,24 +227,28 @@ python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G
 **Note:** For task-discrete rewards, you can use the `get_step_reward_value` function to retrieve them.
 
 
-#### 2.3.4 Data Generation
+#### 2.4.4 Data Generation
 During data replay, by modifying lighting conditions and camera parameters and re-capturing image data, more diverse visual features can be generated for data augmentation, thereby improving the model’s generalization ability.
 ```
 python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G129-Dex1-Joint     --enable_dex1_dds --robot_type g129 --replay  --file_path "/home/unitree/Code/xr_teleoperate/teleop/utils/data" --generate_data --generate_data_dir "./data2"
 ```
 
-- --generate_data: Enables generation of new data.
+- `--generate_data:` Enables generation of new data.
 
-- --generate_data_dir: Directory to store the newly generated data.
+- `--generate_data_dir:` Directory to store the newly generated data.
 
-- --rerun_log: Enables logging during data generation.
+- `--rerun_log:` Enables logging during data generation.
 
-- --modify_light: Enables modification of lighting conditions (you need to adjust the update_light function in main accordingly).
+- `--modify_light:` Enables modification of lighting conditions (you need to adjust the update_light function in main accordingly).
 
-- --modify_camera: Enables modification of camera parameters (you need to adjust the batch_augment_cameras_by_name function in main accordingly).
+- `--modify_camera:` Enables modification of camera parameters (you need to adjust the batch_augment_cameras_by_name function in main accordingly).
 
 **Note:**
 If you wish to modify lighting or camera parameters, please tune and test the parameters carefully before performing large-scale data generation.
+
+
+**Note:** If you are using the simulation together with `xr_teleoperate` for data collection, you need to modify the IP address of the `image_server` in `xr_teleoperate` to match the IP address where the simulation is running.
+
 
 ## 3、Task Scene Construction
 

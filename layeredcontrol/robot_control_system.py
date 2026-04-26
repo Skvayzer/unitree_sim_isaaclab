@@ -119,14 +119,15 @@ class RobotController:
         
         # 2. direct environment step
         env_start = perf_counter()
-        if self.config.replay_mode or self.config.use_rl_action_mode:
-            pass
-            # self.env.sim.render()
-        else:
-            self.env.step(action)
-        env_time = perf_counter() - env_start
-        
-        self.step_count += 1
+        with torch.inference_mode():
+            if self.config.replay_mode or self.config.use_rl_action_mode:
+                pass
+                # self.env.sim.render()
+            else:
+                self.env.step(action)
+            env_time = perf_counter() - env_start
+            
+            self.step_count += 1
         
         # 3. minimal frequency control (no rendering overhead, use the pre-calculated threshold)
         sleep_start = perf_counter()

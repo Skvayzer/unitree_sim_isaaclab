@@ -4,12 +4,13 @@ from action_provider.action_base import ActionProvider
 from typing import Optional
 import torch
 from tools.data_json_load import load_robot_data
-from image_server.shared_memory_utils import MultiImageReader
+from tools.shared_memory_utils import MultiImageReader
 from tools.episode_writer import EpisodeWriter
 import json
 from typing import List, Optional
 import numpy as np
 import time
+from tools.data_convert import convert_to_gripper_range
 class FileActionProviderReplay(ActionProvider):
     """Action provider based on DDS"""
     
@@ -42,6 +43,14 @@ class FileActionProviderReplay(ActionProvider):
             
             self.recorder = EpisodeWriter(task_dir = self.generate_data_dir, frequency = 30, rerun_log = True)
         print(f"FileActionProviderReplay init ok")
+        
+
+        device = self.env.device
+        if hasattr(self, "left_arm_joint_indices"):
+            self._left_arm_idx_t = torch.tensor(self.left_arm_joint_indices, dtype=torch.long, device=device)
+        if hasattr(self, "right_arm_joint_indices"):
+            self._right_arm_idx_t = torch.tensor(self.right_arm_joint_indices, dtype=torch.long, device=device)
+
     def load_data(self, file_path):
         """Setup DDS communication"""
         self.robot_action, self.hand_action, self.sim_state_list,self.task_name_list,self.sim_state_json_list = load_robot_data(file_path)
@@ -64,7 +73,7 @@ class FileActionProviderReplay(ActionProvider):
         return self.start_loop
     def _setup_joint_mapping(self):
         """Setup joint mapping"""
-        if self.enable_robot == "g129":
+        if self.enable_robot == "g129" or self.enable_robot == "h1_2":
             self.arm_joint_mapping = {
                 "left_shoulder_pitch_joint": 0,
                 "left_shoulder_roll_joint": 1,
@@ -172,7 +181,7 @@ class FileActionProviderReplay(ActionProvider):
         try:
             # Get robot command
             if self.action_index < self.total_step_num:
-                if self.enable_robot == "g129":
+                if self.enable_robot == "g129" or self.enable_robot == "h1_2":
                     arm_cmd_data = self.robot_action[self.action_index]
      
                 # Get gripper command
@@ -192,7 +201,10 @@ class FileActionProviderReplay(ActionProvider):
                         sensor.update(0.02, force_recompute=False)
                     env.sim.render()
                     env.observation_manager.compute()
-                    self.save_date(env,arm_cmd_data,hand_cmd_data,self.sim_state_json_list[self.action_index])
+                    while not self.save_date(env,arm_cmd_data,hand_cmd_data,self.sim_state_json_list[self.action_index]):
+                        time.sleep(0.01)
+                        env.sim.render()
+                        env.observation_manager.compute()
                 else:
                     env.sim.render()
                 self.action_index += 1
@@ -214,40 +226,7 @@ class FileActionProviderReplay(ActionProvider):
             print(f"[{self.name}] Get DDS action failed: {e}")
             return None
     
-    def _convert_to_joint_range(self, value):
-        """Convert gripper control value to joint angle"""
-        input_min, input_max = 0.0, 5.6
-        output_min, output_max = 0.03, -0.02
-        value = max(input_min, min(input_max, value))
-        return output_min + (output_max - output_min) * (value - input_min) / (input_max - input_min)
-    def _convert_to_gripper_range(self, value):
-        """Convert the Isaac Lab joint angle to the gripper control value [-0.02, 0.03] -> [5.6, 0]
-        
-        Args:
-            value: the input value, range in [-0.02, 0.03]
-                  -0.02: fully open
-                  0.03: fully closed
-            
-        Returns:
-            float: the converted value, range in [5.6, 0]
-                  5.6: fully open
-                  0.0: fully closed
-        """
-        # input range (joint angle)
-        input_min = 0.03   # fully closed
-        input_max = -0.02  # fully open
-        
-        # output range (gripper control value)
-        output_min = 0.0   # fully closed
-        output_max = 5.6   # fully open
-        
-        # ensure the input value is in the valid range
-        value = max(input_max, min(input_min, value))
-        
-        # linear mapping conversion
-        converted_value = output_min + (output_max - output_min) * (input_min - value) / (input_min - input_max)
-        
-        return converted_value
+
     def cleanup(self):
         """Clean up DDS resources"""
         if self.multi_image_reader:
@@ -262,8 +241,8 @@ class FileActionProviderReplay(ActionProvider):
         left_arm_joint_pose = joint_pos[:,self.left_arm_joint_indices][0].detach().cpu().numpy().tolist()
         right_arm_joint_pose = joint_pos[:,self.right_arm_joint_indices][0].detach().cpu().numpy().tolist()
         if self.enable_gripper:
-            left_hand_joint_pose = np.array(self._convert_to_gripper_range(joint_pos[:,self.left_hand_joint_indices][0].detach().cpu().numpy())).tolist()
-            right_hand_joint_pose = np.array(self._convert_to_gripper_range(joint_pos[:,self.right_hand_joint_indices][0].detach().cpu().numpy())).tolist()
+            left_hand_joint_pose = np.array(convert_to_gripper_range(joint_pos[:,self.left_hand_joint_indices][0].detach().cpu().numpy())).tolist()
+            right_hand_joint_pose = np.array(convert_to_gripper_range(joint_pos[:,self.right_hand_joint_indices][0].detach().cpu().numpy())).tolist()
         else:
             left_hand_joint_pose = joint_pos[:,self.left_hand_joint_indices][0].detach().cpu().numpy().tolist()
             right_hand_joint_pose = joint_pos[:,self.right_hand_joint_indices][0].detach().cpu().numpy().tolist()
@@ -272,18 +251,23 @@ class FileActionProviderReplay(ActionProvider):
         return left_arm_joint_pose,right_arm_joint_pose,left_hand_joint_pose,right_hand_joint_pose
 
     def get_images(self,image_count=3):
-        concatenated_image = self.multi_image_reader.read_concatenated_image()
-        height, total_width, channels = concatenated_image.shape
-        single_width = total_width // image_count
-        if total_width % image_count != 0:
-            raise ValueError("Total width is not divisible by image_count. Cannot split cleanly.")
-
+        """Get images using read_single_image for each camera (no merge/split operations)"""
         images = {}
         names = ['head', 'left', 'right']
-        for i, name in enumerate(names[:image_count]):
-            x_start = i * single_width
-            x_end = x_start + single_width
-            images[name] = concatenated_image[:, x_start:x_end, :]
+
+        for name in names[:image_count]:
+            image = self.multi_image_reader.read_single_image(name)
+            if image is not None:
+                images[name] = image
+            else:
+                print(f"Warning: {name} image not available in shared memory")
+
+        # Check if we have the expected number of images
+        if len(images) != image_count:
+            print(f"Warning: Expected {image_count} images, got {len(images)}")
+            # For backward compatibility, return None if not all images are available
+            return None
+
         return images
     def save_date(self,env,arm_action,hand_action,sim_state=None):
         def ensure_list(data):
@@ -299,6 +283,8 @@ class FileActionProviderReplay(ActionProvider):
         
         left_arm_state,right_arm_state,left_ee_state,right_ee_state = self.get_state(env)
         images = self.get_images()
+        if images is None:
+            return False
         colors = {}
         depths = {}
         left_arm_action = arm_action[:7].tolist()
@@ -366,6 +352,7 @@ class FileActionProviderReplay(ActionProvider):
             }, 
         }
         self.recorder.add_item(colors=colors, depths=depths, states=states, actions=actions,sim_state=sim_state)
+        return True
     def sim_state_to_json(self,data):
         data_serializable = self.tensors_to_list(data)
         json_str = json.dumps(data_serializable)

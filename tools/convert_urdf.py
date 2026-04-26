@@ -42,7 +42,7 @@ parser.add_argument(
     default=False,
     help="合并由固定关节连接的链接",
 )
-parser.add_argument("--fix-base", action="store_true", default=False, help="将基座固定在导入位置")
+parser.add_argument("--fix-base", action="store_true", default=True, help="将基座固定在导入位置")
 parser.add_argument(
     "--joint-stiffness",
     type=float,
@@ -88,7 +88,7 @@ from isaaclab.utils.dict import print_dict
 
 def main():
     # 检查输入文件路径是否有效
-    urdf_path = "/home/unitree/newDisk/URDF/urdf-to-usd/g1withinspire_hand/g1_29dof_with_inpire_rev_1_0.urdf" #args_cli.input
+    urdf_path = "/home/unitree/newDisk/URDF/urdf-to-usd/h1_2_inspire/h1_2.urdf" #args_cli.input
     print(urdf_path)
     if not os.path.isabs(urdf_path):
         urdf_path = os.path.abspath(urdf_path)
@@ -96,7 +96,7 @@ def main():
         raise ValueError(f"无效的文件路径: {urdf_path}")
     
     # 创建输出文件路径
-    dest_path = "/home/unitree/newDisk/URDF/wholevody_with_inspire/g1_29dof_with_inspire_rev_1_0.usd"
+    dest_path = "/home/unitree/newDisk/URDF/urdf-to-usd/h1_2_inspire/h1_2.urdf.usd"
     if not os.path.isabs(dest_path):
         dest_path = os.path.abspath(dest_path)
 
