@@ -12,8 +12,37 @@ Last updated: 2026-04-25
 - **`_PressSensorState_.py`**: `pressure: types.array[types.float32, 12]`, `temperature: types.array[types.float32, 12]`
 - Each hand has **9 PressSensorState modules** (inferred from `tactile_dim=18` in code; 9×2=18)
 - Each module has 12 raw FSR readings in `pressure[12]`
-- DDS topic: `rt/dex3/{left,right}/state`
-- **WARNING**: Array length 9 is INFERRED from code, not confirmed at runtime. Must verify with real robot or DDS bag.
+- DDS topics:
+  - `rt/dex3/{left,right}/state` — main HF hand state (joints + tactile)
+  - `rt/lf/dex3/{left,right}/state` — dedicated low-frequency tactile-only hand state. Same `HandState_` struct, same `press_sensor_state` field; preferred by `xr_teleoperate/.../robot_hand_unitree.py` for tactile reads. **Topics share the same module ordering** — switching topics does NOT change the mapping.
+- **VERIFIED 2026-04-26 (real-robot smoke test)** — count = 9 modules per hand. **The real Dex3 has only 2 thumb sensors (no thumb-proximal sensor) and 3 palm sensors**, contrary to the prior assumption of "1 palm + 3 thumb + 2 middle + 2 index". The mapping is hand-specific for the palm because the firmware enumerates palm sensors in opposite directions on left vs. right (mirrored wiring).
+
+| SDK index | LEFT hand pad | RIGHT hand pad |
+|-----------|---------------|----------------|
+| m0 | thumb_0 | thumb_0 |
+| m1 | thumb_1 | thumb_1 |
+| m2 | middle_0 | middle_0 |
+| m3 | middle_1 | middle_1 |
+| m4 | index_0 | index_0 |
+| m5 | index_1 | index_1 |
+| m6 | palm_2 (at index side) | palm_0 (next to middle finger) |
+| m7 | palm_1 (between fingers, centre) | palm_1 (between fingers, centre) |
+| m8 | palm_0 (next to middle finger) | palm_2 (at index side) |
+
+Palm naming convention (same on both hands): `palm_0` = next to middle-finger side; `palm_1` = centre between fingers; `palm_2` = at index-finger side. The SDK assigns m6→m8 in the index→middle direction on LEFT, and middle→index on RIGHT.
+
+**Sim/real mismatch implications**:
+- Sim's `DEX3_PAD_LINKS` (in `tasks/common_observations/tactile_state.py`) includes `thumb_0_link` (proximal), but the real robot has no tactile sensor there — sim trains on a phantom pad. Either remove `thumb_0_link` from sim training or zero-fill m0 on the sim→real adapter.
+- Sim has 1 palm pad (`palm_link`); real has 3 (m6/m7/m8). Sim is missing 2 dimensions vs. real. Either add 2 palm sub-zones to the URDF / contact sensor or fold the 3 real palm signals into 1 in the real→sim adapter.
+- Authoritative mapping lives in `MODULE_LABELS` in `experiments/system0_rl/tools/real_robot_tactile_smoke_test.py` — keep the two in sync if the table changes.
+
+#### Verified IDL imports (2026-04-26, read directly from installed SDK)
+- `from unitree_sdk2py.idl.unitree_hg.msg.dds_ import HandState_, PressSensorState_`
+- `from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitialize`
+- `ChannelFactoryInitialize(domainId: int = 0, networkInterface: str | None = None)` — call once before creating subscribers
+- `ChannelSubscriber(name: str, type)` → `.Init(handler: Callable, queueLen: int = 0)` registers a callback; `.Read(timeout=None)` polls instead; `.Close()` to clean up
+- `HandState_` full fields (in declared order): `motor_state: sequence[MotorState_]`, `press_sensor_state: sequence[PressSensorState_]`, `imu_state: IMUState_`, `power_v: float32`, `power_a: float32`, `system_v: float32`, `device_v: float32`, `error: uint32[2]`, `reserve: uint32[2]`
+- `PressSensorState_` full fields: `pressure: float32[12]`, `temperature: float32[12]`, `lost: uint32`, `reserve: uint32` — `lost` is a packet-loss counter per module, useful for liveness checks
 
 ### Dex3 URDF Link Names (right hand)
 - Source: `unitree_lerobot/eval_robot/assets/unitree_hand/unitree_dex3_right.urdf`

@@ -2,6 +2,27 @@
 
 ---
 
+## 2026-04-26 — Real-robot tactile smoke test script
+Created `experiments/system0_rl/tools/real_robot_tactile_smoke_test.py`.
+Standalone, read-only DDS subscriber. Awaiting human run on real G1 to verify
+sensor mapping. Will update SYSTEM0_FACTS.md after results come back.
+
+## 2026-04-26 — Tactile sensor mapping verified on real G1
+Ran the smoke test on the real robot (iface eno1). Empirical mapping diverges
+from the assumed sim layout in two ways:
+- **No thumb-proximal sensor**: real Dex3 has 2 thumb pads (`thumb_0`, `thumb_1`),
+  not 3. Sim's `DEX3_PAD_LINKS` has `thumb_0_link` which has no real-robot
+  counterpart.
+- **Three palm sensors**, not one. Indexed in opposite directions on left vs.
+  right (palm strip wired mirrored across hands).
+
+Mapping table now in `SYSTEM0_FACTS.md` and `MODULE_LABELS` in the smoke-test
+script. Sim→real adapter needs to drop the phantom thumb-proximal pad and
+either fold 3 real palm pads into 1 sim pad or add palm sub-zones to the
+sim contact sensor.
+
+---
+
 ## 2026-04-25 21:xx — Session 1
 ### Goal
 Phase 1 audit: ground truth on all code locations, sensor dims, URDF links, contact sensor status. No edits.
