@@ -230,7 +230,7 @@ python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G
 
 **注意:** 如需要修改光照条件或者相机参数，请修改需要的参数并且测试后再进行大量生成。
 
-
+**注意：** 如果使用sim和xr_teleoperate配合进行数据采集，需要修改xr_teleoperate中关于image_server的IP地址为sim启动的IP地址。
 
 
 ## 3、任务场景搭建

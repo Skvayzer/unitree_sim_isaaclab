@@ -246,6 +246,10 @@ python sim_main.py --device cpu  --enable_cameras  --task Isaac-Stack-RgyBlock-G
 **Note:**
 If you wish to modify lighting or camera parameters, please tune and test the parameters carefully before performing large-scale data generation.
 
+
+**Note:** If you are using the simulation together with `xr_teleoperate` for data collection, you need to modify the IP address of the `image_server` in `xr_teleoperate` to match the IP address where the simulation is running.
+
+
 ## 3、Task Scene Construction
 
 ### 3.1 Code Structure
