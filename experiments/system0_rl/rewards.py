@@ -1,90 +1,213 @@
-"""Dense per-step reward for System 0 RL training.
+"""Dense per-step reward for System 0 blind tactile grasping — phase-aware v2.
 
-All signals are proprioceptive (EE position via FK, contact forces, torques)
-so the same reward can be computed on the real robot without any object tracking.
+Replaces the monolithic gentle_contact signal with four phase-gated signals
+that create a continuous gradient: search → palpation → force-closure → lift.
+
+Key fixes vs v1
+───────────────
+1. The 1.5 N gentle ceiling was physically wrong for grasping. Dex3 needs
+   ~5 N/finger for a tripod grasp (μ ≈ 0.5 → mg/μ spread across 3 contacts).
+   v1 penalised the policy for doing the physically necessary thing.
+   New overforce threshold: 5 N (allows real grasp force, punishes crushing).
+
+2. No opposition signal meant the policy couldn't distinguish "thumb opposing
+   index+middle" from "pat block from above". r_closure fixes this via
+   min(thumb_force, opposing_force) through a smooth tanh.
+
+3. Palpation reward gates out when ≥3 right-hand pads engage. This forces a
+   continuous gradient: adding a third pad switches from r_palpation to
+   r_closure, which rewards thumb/finger opposition.
+
+4. Lift rewards are gated on has_grasp to prevent the sky-hook exploit (wrist
+   raises block by friction without a real pinch).
+
+Right-hand pad indices in the 16D tactile observation
+──────────────────────────────────────────────────────
+See DEX3_PAD_LINKS in tasks/common_observations/tactile_state.py:
+  Left hand:  0=palm 1=thumb0 2=thumb1 3=thumb2 4=middle0 5=middle1 6=index0 7=index1
+  Right hand: 8=palm 9=thumb0 10=thumb1 11=thumb2 12=middle0 13=middle1 14=index0 15=index1
 """
 
 import torch
-from .scripted_controller import Phase
+from tasks.common_observations.tactile_state import get_tactile_obs
 
-TABLE_Z = 0.822
+# ── Right-hand pad slices in the 16D tactile obs ───────────────────────────
+_R_ALL    = [8, 9, 10, 11, 12, 13, 14, 15]   # all 8 right-hand pads
+# Relative indices within f_right (shape N×8):
+# [0]=palm  [1]=thumb0  [2]=thumb1  [3]=thumb2
+# [4]=middle0  [5]=middle1  [6]=index0  [7]=index1
+
+# ── Reward tuning constants ────────────────────────────────────────────────
+# Phase 1 — search
+SEARCH_COEFF        = 0.05   # small reward when no right-hand contact; keeps exploration
+
+# Phase 2 — palpation (1–2 pads active, block not yet rising)
+PAL_FORCE_MIN       = 0.10   # N — start of gentle window
+PAL_FORCE_MAX       = 1.50   # N — top of gentle window (only used in palpation phase)
+PAL_COEFF           = 0.30   # per-step; was 0.50 in v1
+
+# Phase 3 — force closure (≥3 pads active)
+CLOSURE_COEFF       = 1.00   # scales tanh(opposition / CLOSURE_SAT)
+CLOSURE_SAT         = 3.00   # N total — opposition at which tanh saturates
+
+# Grasp gate thresholds for has_grasp (used to gate lift reward)
+GRASP_THUMB_THR     = 0.50   # N — minimum thumb differential force
+GRASP_OTHER_THR     = 0.50   # N — minimum opposing-finger differential force
+
+# Phase 4 — lift (gated on has_grasp)
+LIFT_DELTA          = 0.03   # m — height threshold for binary bonus
+LIFT_PROP_COEFF     = 20.00  # was 3.0
+LIFT_BONUS          = 50.00  # was 5.0
+
+# Overforce — physical ceiling; ~5 N/finger is normal for a real pinch grasp
+OVERFORCE_THR       = 5.00   # N (was 2.0 — that was blocking necessary grasp force)
+OVERFORCE_COEFF     = 0.0    # disabled: baseline residual on middle_0 (~57N) makes this term
+                             # always-negative regardless of policy behavior; tanh in r_closure
+                             # already saturates at high force — this is redundant and harmful
+
+# Block geometry
+BLOCK_INIT_Z        = 0.819  # m — nominal block top
+
+# Smoothness
+SMOOTH_COEFF        = 0.002
+
+# ── Per-env idle contact baseline ─────────────────────────────────────────
+_CONTACT_BASELINE: "torch.Tensor | None" = None
+
+# ── Diagnostic logging (stdout every N reward calls) ──────────────────────
+_LOG_EVERY    = 500
+_reward_calls = 0
 
 
-def compute_reward(
-    env, phase, hand, block_name, current_block_idx,
-    coarse_targets, refined_targets, config, device="cpu", env_idx=0,
-):
-    reward = 0.0
+def set_contact_baseline(env, device) -> None:
+    """Capture idle table-contact forces right after env.reset() to tare sensor."""
+    global _CONTACT_BASELINE
+    try:
+        _CONTACT_BASELINE = get_tactile_obs(env).detach().clone().to(device)
+    except Exception:
+        _CONTACT_BASELINE = None
+
+
+def _check_force_closure(f_right: torch.Tensor) -> torch.Tensor:
+    """Batched has_grasp: thumb AND at least one opposing finger engaged.
+
+    f_right: (N, 8) right-hand differential forces, relative indices:
+      [1:4] = thumb0/1/2,  [4:6] = middle0/1,  [6:8] = index0/1
+    Returns: (N,) bool tensor
+    """
+    thumb_max  = f_right[:, 1:4].max(dim=1).values
+    index_max  = f_right[:, 6:8].max(dim=1).values
+    middle_max = f_right[:, 4:6].max(dim=1).values
+    return (thumb_max > GRASP_THUMB_THR) & (
+        (index_max > GRASP_OTHER_THR) | (middle_max > GRASP_OTHER_THR)
+    )
+
+
+def compute_reward_blind(
+    env,
+    prev_hand_vel: torch.Tensor,             # (num_envs, 7) right-hand joint vels, previous step
+    cur_hand_vel: torch.Tensor,              # (num_envs, 7) right-hand joint vels, current step
+    device,
+    block_init_z: "torch.Tensor | None" = None,  # (num_envs,) per-env block resting Z; falls back to BLOCK_INIT_Z
+) -> torch.Tensor:
+    """Vectorized per-step reward. Returns (num_envs,) tensor."""
+    global _reward_calls
+    _reward_calls += 1
+    N = env.num_envs
+    reward = torch.zeros(N, device=device)
+
+    has_grasp = torch.zeros(N, dtype=torch.bool, device=device)
 
     try:
-        ee_pos = _get_ee_pos(env, hand, env_idx)
-        contact = _get_contact_force(env, hand, env_idx)
-    except (KeyError, AttributeError, IndexError):
-        return 0.0
+        f_raw = get_tactile_obs(env).to(device)          # (N, 16)
 
-    stack_target = torch.tensor([-4.19, -3.95, TABLE_Z], device=device)
-    place_pos = stack_target.clone()
-    place_pos[2] += current_block_idx * config.block_height + config.block_height
-    dist_to_place = (ee_pos[:2] - place_pos[:2]).norm().item()
+        if _CONTACT_BASELINE is not None:
+            f = (f_raw - _CONTACT_BASELINE).clamp(min=0.0)
+        else:
+            f = f_raw
 
-    if phase == Phase.APPROACH:
-        pass  # no reward — policy must find the block via exploration and tactile feedback
+        f_right = f[:, _R_ALL]   # (N, 8) right-hand differential forces
 
-    elif phase == Phase.PRE_GRASP:
-        reward += 0.2
+        # ── Phase detection ────────────────────────────────────────────────
+        active_r   = (f_right > PAL_FORCE_MIN).sum(dim=1).float()   # (N,)
+        no_contact = (active_r == 0)
+        palpating  = (active_r >= 1) & (active_r <= 2)
 
-    elif phase == Phase.GRASP:
-        reward += 2.0 * (contact > config.grasp_force_threshold)
-        reward += -0.1 * max(0, contact - 5.0)
+        # ── Phase 1: search reward — tiny incentive to keep exploring ──────
+        r_search = SEARCH_COEFF * no_contact.float()
+        reward  += r_search
 
-    elif phase == Phase.LIFT:
-        ee_height = ee_pos[2].item() - TABLE_Z
-        reward += 3.0 * max(0, ee_height)
-        reward += 1.0 * (ee_height > config.lift_height * 0.8)
+        # ── Phase 2: palpation — gentle touch rewarded ONLY for 1–2 pads ──
+        # Gates out when third pad engages → gradient continuously points
+        # toward adding more fingers (into r_closure territory)
+        in_window   = (f_right - PAL_FORCE_MIN).clamp(min=0.0)
+        normed      = (in_window / (PAL_FORCE_MAX - PAL_FORCE_MIN)).clamp(max=1.0)
+        best_gentle = normed.max(dim=1).values             # (N,)
+        r_palpation = PAL_COEFF * best_gentle * palpating.float()
+        reward     += r_palpation
 
-    elif phase == Phase.TRANSPORT:
-        reward += -1.5 * dist_to_place
-        reward += 0.5 * (dist_to_place < config.approach_dist * 2)
+        # ── Phase 3: force closure — reward thumb opposing index/middle ────
+        # min(thumb, opposing) via tanh: both sides must engage; smooth gradient
+        thumb_force    = f_right[:, 1:4].sum(dim=1)   # thumb0 + thumb1 + thumb2
+        opposing_force = f_right[:, 4:8].sum(dim=1)   # middle0+1 + index0+1
+        opposition     = torch.minimum(thumb_force, opposing_force)
+        r_closure      = CLOSURE_COEFF * torch.tanh(opposition / CLOSURE_SAT)
+        reward        += r_closure
 
-    elif phase == Phase.DESCEND:
-        height_error = abs(ee_pos[2].item() - place_pos[2].item())
-        reward += -2.0 * height_error
-        reward += -0.3 * max(0, contact - 3.0)
+        # ── Overforce — new 5 N ceiling allows real grasp force ────────────
+        over   = (f_right - OVERFORCE_THR).clamp(min=0.0)
+        r_over = -OVERFORCE_COEFF * (over ** 2).sum(dim=1)
+        reward += r_over
 
-    elif phase == Phase.RELEASE:
-        # Contact drop near place target = proxy for successful block placement
-        reward += 5.0 * (contact < config.grasp_force_threshold)
+        # ── has_grasp gate for lift reward ─────────────────────────────────
+        has_grasp = _check_force_closure(f_right)
 
-    elif phase == Phase.RETREAT:
-        reward += 0.1
+        if _reward_calls % _LOG_EVERY == 0:
+            print(
+                f"[reward_diag] calls={_reward_calls} "
+                f"r_pal={r_palpation.mean():.4f} "
+                f"r_clo={r_closure.mean():.4f} "
+                f"has_grasp={has_grasp.float().mean():.3f} "
+                f"active_pads={active_r.mean():.2f} "
+                f"thumb_f={thumb_force.mean():.3f} "
+                f"opp_f={opposing_force.mean():.3f}"
+            )
 
-    try:
-        torques = env.scene["robot"].data.applied_torque[env_idx, -28:]
-        reward += -0.005 * (torques ** 2).sum().item()
-    except (KeyError, AttributeError, IndexError):
+    except Exception:
         pass
 
-    delta_q = refined_targets - coarse_targets
-    reward += -1.0 * (delta_q ** 2).sum().item()
+    # ── Phase 4: lift — gated on has_grasp ────────────────────────────────
+    try:
+        block_z    = env.scene["block"].data.root_pos_w[:, 2].to(device)
+        ref_z      = block_init_z.to(device) if block_init_z is not None else \
+                     torch.full_like(block_z, BLOCK_INIT_Z)
+        lift_delta = (block_z - ref_z).clamp(min=0.0)
+        g          = has_grasp.float()
+        r_lift_prop  = LIFT_PROP_COEFF * lift_delta * g
+        r_lift_bonus = LIFT_BONUS * (lift_delta > LIFT_DELTA).float() * g
+        reward      += r_lift_prop + r_lift_bonus
+
+        if _reward_calls % _LOG_EVERY == 0:
+            print(
+                f"[reward_diag] r_lift_prop={r_lift_prop.mean():.4f} "
+                f"r_lift_bonus={r_lift_bonus.mean():.4f}"
+            )
+    except (KeyError, AttributeError):
+        pass
+
+    # ── Smoothness ─────────────────────────────────────────────────────────
+    accel   = (cur_hand_vel - prev_hand_vel).abs().sum(dim=1)
+    reward -= SMOOTH_COEFF * accel
 
     return reward
 
 
-def _get_ee_pos(env, hand, env_idx=0):
-    body_names = env.scene["robot"].data.body_names
-    wrist_name = f"{hand}_wrist_yaw"
-    for i, name in enumerate(body_names):
-        if wrist_name in name:
-            return env.scene["robot"].data.body_pos_w[env_idx, i]
-    return torch.zeros(3)
-
-
-def _get_contact_force(env, hand, env_idx=0):
+def is_lift_success(env, device, block_init_z: "torch.Tensor | None" = None) -> torch.Tensor:
+    """Return bool (num_envs,) — True when block is above LIFT_DELTA threshold."""
     try:
-        forces = env.scene["fingertip_contacts"].data.net_forces_w[env_idx]
-        if hand == "right":
-            return forces[3:6].norm(dim=-1).sum().item()
-        else:
-            return forces[0:3].norm(dim=-1).sum().item()
+        block_z = env.scene["block"].data.root_pos_w[:, 2].to(device)
+        ref_z   = block_init_z.to(device) if block_init_z is not None else \
+                  torch.full_like(block_z, BLOCK_INIT_Z)
+        return (block_z - ref_z) > LIFT_DELTA
     except (KeyError, AttributeError):
-        return 0.0
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=device)

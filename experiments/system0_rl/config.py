@@ -1,59 +1,63 @@
-"""Hyperparameters for System 0 MoE standalone RL training."""
+"""Hyperparameters for System 0 blind-grasping RL training (BlockStackEnvCfg)."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class TrainConfig:
-    # Environment
-    task_id: str = "Isaac-Stack-RgyBlock-G129-Dex3-Joint"
-    num_envs: int = 1
+    # ── Environment ────────────────────────────────────────────────────────
+    num_envs: int = 512
     headless: bool = True
-    sim_dt: float = 0.005  # 200 Hz sim
+    sim_dt: float = 0.005   # 200 Hz sim
     control_dt: float = 0.01  # 100 Hz control
 
-    # System 0 MoE
-    joint_dim: int = 28
-    vel_dim: int = 28
-    tactile_dim: int = 16  # 8 pad links x 2 hands, scalar magnitude per link
-    torque_dim: int = 28
-    target_dim: int = 28
-    intent_dim: int = 128  # scripted controller phase encoding
+    # ── Observation dims ───────────────────────────────────────────────────
+    # Right hand only (7 finger joints).
+    joint_dim: int = 7    # right finger qpos
+    vel_dim: int = 7      # right finger qvel
+    torque_dim: int = 7   # right finger applied torques
+    # Extended tactile: 4 channels × 16 pads = 64.
+    tactile_dim: int = 64
+    # Coarse target fed to MoE as context (same shape as action).
+    target_dim: int = 7
+
+    # ── MoE architecture ──────────────────────────────────────────────────
+    intent_dim: int = 128  # curriculum-stage encoding (one-hot @ [:4], rest zero)
     hidden_dim: int = 256
     n_experts: int = 8
     top_k: int = 2
     feedback_dim: int = 64
 
+    # ── Action ────────────────────────────────────────────────────────────
+    # Action = tanh(policy_raw) * delta_max  (offset from default hand pose).
+    # BlockStackEnvCfg action_manager applies scale=1.5, use_default_offset=True,
+    # so the effective joint displacement is delta_max * 1.5 radians max.
+    delta_max: float = 0.5
 
-    # PPO
+    # ── Exploration: Ornstein-Uhlenbeck noise ─────────────────────────────
+    ou_theta: float = 0.15   # mean-reversion rate
+    ou_sigma: float = 0.10   # noise scale
+
+    # ── Curriculum (block XY offset beyond env's built-in ±8 mm) ─────────
+    # Stages: 0=fixed, 1=±2 cm, 2=±5 cm, 3=±5 cm + DR
+    curriculum_xy_ranges: tuple = (0.00, 0.02, 0.05, 0.05)
+    curriculum_success_threshold: float = 0.75  # lift rate to advance
+    curriculum_min_episodes: int = 1000         # min episodes before advancing
+
+    # ── PPO ───────────────────────────────────────────────────────────────
     lr: float = 3e-4
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_eps: float = 0.2
     value_coeff: float = 0.5
-    entropy_coeff: float = 0.01
+    entropy_coeff: float = 0.001  # was 0.01 — reduced 10× after entropy trap at step 1.3M (qg9b59c4)
     max_grad_norm: float = 0.5
     ppo_epochs: int = 4
-    minibatch_size: int = 256
-    rollout_steps: int = 2048  # steps per rollout before PPO update
+    minibatch_size: int = 512
+    rollout_steps: int = 256  # steps per rollout per env before PPO update
 
-    # Training
-    total_timesteps: int = 2_000_000
-    log_interval: int = 10  # PPO updates between logs
+    # ── Training schedule ─────────────────────────────────────────────────
+    total_timesteps: int = 20_000_000  # was 10M; bumped to allow continuing from 10M checkpoint
+    log_interval: int = 10   # PPO updates between logs
     save_interval: int = 50  # PPO updates between saves
     checkpoint_dir: str = "experiments/system0_rl/checkpoints"
-
-    # Scripted controller
-    approach_dist: float = 0.13  # m, close enough to start pre-grasp (includes height offset)
-    grasp_force_threshold: float = 0.3  # N, contact force for successful grasp
-    lift_height: float = 0.15  # m above table
-    block_height: float = 0.05  # m
-    stacking_order: list[str] = field(
-        default_factory=lambda: ["red_block", "yellow_block", "green_block"]
-    )
-
-    # Gains
-    kp_base_arm: float = 80.0
-    kp_base_finger: float = 1.5
-    kd_base_arm: float = 5.0
-    kd_base_finger: float = 0.1
