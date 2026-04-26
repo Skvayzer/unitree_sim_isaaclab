@@ -16,8 +16,8 @@ class TrainConfig:
     joint_dim: int = 7    # right finger qpos
     vel_dim: int = 7      # right finger qvel
     torque_dim: int = 7   # right finger applied torques
-    # Extended tactile: 4 channels × 16 pads = 64.
-    tactile_dim: int = 64
+    # Extended tactile: 4 channels × 18 pads = 72.
+    tactile_dim: int = 72
     # Coarse target fed to MoE as context (same shape as action).
     target_dim: int = 7
 

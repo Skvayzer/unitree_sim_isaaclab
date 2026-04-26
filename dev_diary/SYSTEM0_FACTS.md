@@ -1,6 +1,6 @@
 # System 0 — Verified Facts (append-only)
 
-Last updated: 2026-04-25
+Last updated: 2026-04-26 (real-robot tactile alignment — 16D→18D)
 
 ---
 
@@ -10,10 +10,12 @@ Last updated: 2026-04-25
 - **IDL file**: `~/unitree_sdk2_python/unitree_sdk2py/idl/unitree_hg/msg/dds_/_HandState_.py`
 - `HandState_.press_sensor_state`: `types.sequence[PressSensorState_]` — variable-length
 - **`_PressSensorState_.py`**: `pressure: types.array[types.float32, 12]`, `temperature: types.array[types.float32, 12]`
-- Each hand has **9 PressSensorState modules** (inferred from `tactile_dim=18` in code; 9×2=18)
+- Each hand has **9 PressSensorState modules** — VERIFIED from real-robot smoke test MODULE_LABELS
 - Each module has 12 raw FSR readings in `pressure[12]`
+- Per-module scalar: `sum(press_sensor_state[i].pressure[0:12])`
+- Idle noise: ~20-30 ADC counts; clear touch: ≥100 ADC counts
 - DDS topic: `rt/dex3/{left,right}/state`
-- **WARNING**: Array length 9 is INFERRED from code, not confirmed at runtime. Must verify with real robot or DDS bag.
+- **No thumb_2 sensor on real hardware** — sim's `thumb_2_link` is a fiction; excluded from tactile contract
 
 ### Dex3 URDF Link Names (right hand)
 - Source: `unitree_lerobot/eval_robot/assets/unitree_hand/unitree_dex3_right.urdf`
@@ -31,17 +33,32 @@ Last updated: 2026-04-25
 | Index distal | `right_hand_index_1_link` |
 
 - Additional non-contact links in URDF (do NOT add to ContactSensor): `base_link_thumb`, `base_link_index`, `base_link_middle`, `base_link`, `thumb_tip`, `index_tip`, `middle_tip`
-- **Total pad links per hand: 8** (palm + 3 thumb + 2 middle + 2 index)
-- **Total both hands: 16 links**
+- **`thumb_2_link` exists in URDF** but has NO real sensor — excluded from `DEX3_PAD_LINKS`
+- **Tactile contract per hand: 9 modules** (palm×3 zones + thumb×2 + middle×2 + index×2)
+- **Total tactile modules both hands: 18**
 
-### Tactile Observation Dimensions
-- Real robot: 9 modules × 1 scalar each = **9D per hand, 18D total**
-- Sim contact sensor: monitors **18 bodies** (confirmed run qg9b59c4 output.log), but `get_tactile_obs()` selects only the 16 `DEX3_PAD_LINKS` — `left_hand_camera_base_link` (sensor idx 0) and `right_hand_camera_base_link` (sensor idx 9) are intentionally excluded.
-  - Actual `get_tactile_obs()` output: **(N, 16)** — 8 links/hand in `DEX3_PAD_LINKS` order
-  - Sensor body layout: camera_base_link at idx 0/9; palm_link at 1/10; index_0 2/11; index_1 3/12; middle_0 4/13; middle_1 5/14; thumb_0 6/15; thumb_1 7/16; thumb_2 8/17
-- `get_tactile_obs_extended()` → **(N, 64)** (4 channels × 16 pads)
-- CraftNet code uses `tactile_dim=18` — sim outputs 16D. **Mismatch still present (see Known Issues #3).**
-- Resolution path: add `{hand}_camera_base_link` to `DEX3_PAD_LINKS` to bring sim to 18D, OR zero-pad module 8 per hand on real-robot adapter.
+### Tactile Observation Dimensions — ALIGNED 2026-04-26
+- **Real robot**: 9 modules per hand = **18D total**
+- **Sim `get_tactile_obs()`** → **(N, 18)** — 18 entries in `DEX3_PAD_LINKS` order
+  - Palm body link appears 3x (palm_0/1/2); each zone = palm_force / 3 (equal-split)
+  - `thumb_2_link` excluded (no real sensor)
+- `get_tactile_obs_extended()` → **(N, 72)** (4 channels x 18 pads)
+  - pressure[0:18] | binary[18:36] | delta[36:54] | duration[54:72]
+- **Sim->real mismatch: RESOLVED.** Both sim and real output 18D in the same module order.
+- Palm spatial split: real SDK uses contact positions; sim uses equal-split (palm_total/3).
+
+Module order (left hand slots 0-8, right hand slots 9-17):
+| Slot (L/R+9) | Module | Sim body | Notes |
+|---|---|---|---|
+| 0 | palm_0 (middle side) | `{hand}_palm_link` | equal-split /3 |
+| 1 | palm_1 (centre) | `{hand}_palm_link` | equal-split /3 |
+| 2 | palm_2 (index side) | `{hand}_palm_link` | equal-split /3 |
+| 3 | thumb_0 (proximal) | `{hand}_thumb_0_link` | — |
+| 4 | thumb_1 (tip) | `{hand}_thumb_1_link` | — |
+| 5 | middle_0 (proximal) | `{hand}_middle_0_link` | — |
+| 6 | middle_1 (tip) | `{hand}_middle_1_link` | — |
+| 7 | index_0 (proximal) | `{hand}_index_0_link` | — |
+| 8 | index_1 (tip) | `{hand}_index_1_link` | — |
 
 ---
 
@@ -69,7 +86,7 @@ Last updated: 2026-04-25
 ### Isaac Lab (sim-side)
 - **Dex3 stack task env cfg**: `tasks/g1_tasks/stack_rgyblock_g1_29dof_dex3/stack_rgyblock_g1_29dof_dex3_joint_env_cfg.py`
 - **ContactSensorCfg**: EXISTS at line 48 as `fingertip_contacts = ContactSensorCfg(...)`
-- **Tactile obs function**: `tasks/common_observations/tactile_state.py` — `get_tactile_obs()` returns 16D, `get_tactile_obs_extended()` returns 64D
+- **Tactile obs function**: `tasks/common_observations/tactile_state.py` — `get_tactile_obs()` returns 18D, `get_tactile_obs_extended()` returns 72D
 - **`activate_contact_sensors=False`** in: `tasks/common_scene/base_scene_pick_redblock_into_drawer.py:93`
 - **Standalone RL train**: `experiments/system0_rl/train.py` — uses `BlockStackEnvCfg` (NOT `System0TrainEnvCfg`)
 
@@ -155,43 +172,43 @@ The 96D tactile feature vector and new MoE live in the **standalone RL** (`exper
 
 | Slot | Dim | Notes |
 |---|---|---|
-| Tactile features (4 ch × 16 sim pads) | 64 | binary+logp+edges+duration per pad |
+| Tactile features (4 ch × 18 sim pads) | 72 | pressure+binary+delta+duration per pad |
 | Right finger torques | 7 | right hand only (matches action space) |
 | Right finger qpos | 7 | right hand only |
 | Left finger torques | 7 | observe both hands |
 | Left finger qpos | 7 | observe both hands |
 | Physical intent (zeroed during pure RL) | 128 | kept for future joint-training compat |
 
-**Total tactile feature vector**: 64 + 7 + 7 + 7 + 7 = **92D** (not 96 as in brief; brief formula counts 4×18=72 assuming 18 sim pads, but sim has 16 → 4×16=64; recomputed correctly)
+**Total tactile feature vector**: 72 + 7 + 7 + 7 + 7 = **100D** (18 real-aligned pads × 4 channels = 72; sim now matches real)
 
-**Gating network input**: 92D features + 128D intent = **220D**
+**Gating network input**: 100D features + 128D intent = **228D**
 
-**Per expert**: `Linear(220→256) → ReLU → Linear(256→14)` (14D = 7L + 7R fingers)
+**Per expert**: `Linear(228→256) → ReLU → Linear(256→14)` (14D = 7L + 7R fingers)
 
 **N_EXPERTS**: 4, TOP_K: 2 (dense soft gating, all experts always evaluated)
 
 ---
 
-## Sim→Real Tactile Pad Mapping
+## Sim→Real Tactile Pad Mapping — VERIFIED 2026-04-26
 
-**Decision**: 8 sim pads per hand (Option B — no URDF surgery). Documented gap: real robot has 9 modules/hand.
+**Status**: ALIGNED — sim and real now use identical 18D layout.
 
-Real-robot module index → sim link:
+Verified module index → sim body (per hand; duplicate palm entries use equal-split /3):
 
-| Module idx | Real module (inferred) | Sim link |
-|---|---|---|
-| 0 | palm zone A | `{hand}_palm_link` |
-| 1 | index proximal | `{hand}_index_0_link` |
-| 2 | index distal | `{hand}_index_1_link` |
-| 3 | middle proximal | `{hand}_middle_0_link` |
-| 4 | middle distal | `{hand}_middle_1_link` |
-| 5 | thumb proximal | `{hand}_thumb_0_link` |
-| 6 | thumb mid | `{hand}_thumb_1_link` |
-| 7 | thumb distal | `{hand}_thumb_2_link` |
-| 8 | palm zone B | **NO SIM LINK** — zero-padded in sim→real adapter |
+| Module idx | Real module (VERIFIED) | Sim body | Sim slot (L/R+9) |
+|---|---|---|---|
+| 0 | palm_0 (middle side) | `{hand}_palm_link` (÷3) | 0 / 9 |
+| 1 | palm_1 (centre) | `{hand}_palm_link` (÷3) | 1 / 10 |
+| 2 | palm_2 (index side) | `{hand}_palm_link` (÷3) | 2 / 11 |
+| 3 | thumb_0 (proximal) | `{hand}_thumb_0_link` | 3 / 12 |
+| 4 | thumb_1 (tip) | `{hand}_thumb_1_link` | 4 / 13 |
+| 5 | middle_0 (proximal) | `{hand}_middle_0_link` | 5 / 14 |
+| 6 | middle_1 (tip) | `{hand}_middle_1_link` | 6 / 15 |
+| 7 | index_0 (proximal) | `{hand}_index_0_link` | 7 / 16 |
+| 8 | index_1 (tip) | `{hand}_index_1_link` | 8 / 17 |
 
-Real-robot deployment: 9-element vector per hand; index 8 is zeroed by sim-trained policy.
-**TODO**: revisit if palm zone B turns out critical for real-robot grasps.
+**No zero-padding required.** All 9 real modules have corresponding sim entries.
+Palm zones use equal-split (sim approximation); real SDK provides spatial contact positions.
 
 ---
 
@@ -206,8 +223,8 @@ Real-robot deployment: 9-element vector per hand; index 8 is zeroed by sim-train
 
 1. ~~**Bug**: `env.scene["block"]`~~ **FIXED 2026-04-25** — renamed to `"red_block"` in `rewards.py` (both functions) and `apply_curriculum()` in `train.py`.
 2. ~~**Brief says `[14:28]`**~~ **CLARIFIED** — code at `[7:14]`+`[21:28]` is correct; brief had error.
-3. **Dim mismatch (open)**: `get_tactile_obs()` returns 16D (8 links/hand × 2); real robot = 18D. Sensor covers 18 bodies but camera_base_link pads are excluded by `DEX3_PAD_LINKS`. Fix: add camera_base_link to `DEX3_PAD_LINKS` to reach 18D, OR zero-pad module 8 per hand in real-robot adapter. CraftNet stays at 18D — not our concern (read-only).
+3. ~~**Dim mismatch**~~ **FIXED 2026-04-26**: `get_tactile_obs()` now returns 18D (9 modules/hand × 2 = 18). DEX3_PAD_LINKS rewritten with 3 palm zones (equal-split) and no thumb_2. `get_tactile_obs_extended()` now 72D. config.py `tactile_dim=72`. Obs dim 85→93, obs_with_targets 92→100, MoE input 220→228. Requires fresh checkpoint (breaks compat with Run 1-17 weights).
 4. **`activate_contact_sensors`**: confirmed `True` in `BlockStackEnvCfg` at line 60. No action needed.
-5. **RLSystem0Policy COMPLETE** (Phase 3, 2026-04-26): `experiments/system0_rl/system0_moe.py` — 4 experts, flat MoE, 0.358M params, obs_dim=92 (tactile_64|r_torq_7|r_qpos_7|l_torq_7|l_qpos_7), gate_dim=220. **obs_dim=92 is correct**: `get_tactile_obs_extended()` returns 64D (4 channels × 16 pads; camera_base_link excluded by `DEX3_PAD_LINKS`). `build_rl_system0_obs()` added to train.py. Wire in next run by replacing `System0PPOWrapper` + `build_obs_batch()` with `RLSystem0Policy` + `build_rl_system0_obs()` + `build_left_joint_index_map()`. Current run uses `System0PPOWrapper` (8 experts, 4.4M params).
+5. **RLSystem0Policy COMPLETE** (Phase 3, 2026-04-26, updated 2026-04-26 real-align): `experiments/system0_rl/system0_moe.py` — 4 experts, flat MoE. After real-align: obs_dim=100 (tactile_72|r_torq_7|r_qpos_7|l_torq_7|l_qpos_7), gate_dim=228. `build_rl_system0_obs()` in train.py now returns (N,100). Wire in next run by replacing `System0PPOWrapper` + `build_obs_batch()` with `RLSystem0Policy` + `build_rl_system0_obs()` + `build_left_joint_index_map()`. Current runs (1-17) use `System0PPOWrapper` (8 experts, 4.4M params) — checkpoint incompatible after real-align.
 6. **UnifoLM server** on remote PC uses 16592 MiB / 49140 MiB GPU. ~32GB free for RL training.
 7. **Phase 2 verification still needed**: run 100-step scripted closing test — open hand should give all-zero contacts; closed on cube should give nonzero on contact pads.

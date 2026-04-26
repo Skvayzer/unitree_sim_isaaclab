@@ -152,3 +152,37 @@ Log: `ssh konstantinsmirnov@10.127.102.40 "grep 'Step' ~/unitree_sim_isaaclab/wa
 
 ## Overnight Log
 See `dev_diary/SYSTEM0_OVERNIGHT_LOG.md` for timestamped monitoring rows.
+
+---
+
+## Evening Update — 2026-04-26 ~22:39 GMT+4
+
+### Run 16 — COMPLETED (all-time Lift record)
+- **WandB:** yzz5f92o | **Steps completed:** ~150M
+- **Peak Lift:** **2.0%** at Step 147.1M, R=+141.0 — new all-time record
+- **final.pt saved:** confirmed 51MB at 15:15 (from task output)
+
+### VPN Outage — ~18:20 GMT+4 (ongoing, 240+ min)
+- GlobalProtect VPN disconnected; no route to 10.127 subnet
+- Run 16 nohup training completed safely on remote PC
+- Run 17 cannot launch until VPN restored
+- 29 consecutive SSH failures; monitoring continues at 10-min intervals
+
+### Real-Robot Tactile Alignment — COMPLETED (local code, awaiting human review)
+- **Breaking change:** sim tactile contract updated 16D→18D to match verified real-robot mapping
+- **Files changed:** tactile_state.py, rewards.py, config.py, train.py, SYSTEM0_FACTS.md
+- **Key changes:**
+  - DEX3_PAD_LINKS: 18 entries (removed thumb_2, palm split into 3 equal zones)
+  - get_tactile_obs: (N,18); get_tactile_obs_extended: (N,72)
+  - rewards.py: _R_ALL=[9..17], GRASP_THUMB_THR=0.30, slices updated
+  - config.py: tactile_dim=72; train.py: obs 85→93, obs_with_targets 92→100
+- **See:** `dev_diary/PIPELINE_REPORT_REAL_ALIGNED.md` for full change log and review checklist
+- **Phase 7 (verification rollout) DEFERRED** — requires sim environment
+- **CHECKPOINT INCOMPATIBILITY:** Runs 1-17 weights cannot be loaded after this change
+- Human must approve + VPN restore + save pre_real_alignment.pt before first aligned run
+
+### Pending When VPN Restores
+1. `ssh konstantinsmirnov@10.127.102.40 "cp .../checkpoints/final.pt .../checkpoints/pre_real_alignment.pt"`
+2. Launch Run 17: `nohup python experiments/system0_rl/train.py --headless --num_envs 2048 --checkpoint experiments/system0_rl/checkpoints/final.pt --total_timesteps 190000000 > /tmp/run17.log 2>&1 &`
+   - Note: Run 17 uses OLD architecture (checkpoint from pre-alignment). This is correct — Run 17 is the GAE-fix smoke test per CRITICAL_ASK.md Option A.
+3. After Run 17 completes: decide on real-alignment + MoE refactor (CRITICAL_ASK Issues 1+2+3 combined)

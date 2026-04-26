@@ -21,21 +21,24 @@ Key fixes vs v1
 4. Lift rewards are gated on has_grasp to prevent the sky-hook exploit (wrist
    raises block by friction without a real pinch).
 
-Right-hand pad indices in the 16D tactile observation
+Right-hand pad indices in the 18D tactile observation
 ──────────────────────────────────────────────────────
 See DEX3_PAD_LINKS in tasks/common_observations/tactile_state.py:
-  Left hand:  0=palm 1=thumb0 2=thumb1 3=thumb2 4=middle0 5=middle1 6=index0 7=index1
-  Right hand: 8=palm 9=thumb0 10=thumb1 11=thumb2 12=middle0 13=middle1 14=index0 15=index1
+  Left hand:  0=palm_0 1=palm_1 2=palm_2 3=thumb_0 4=thumb_1 5=middle_0 6=middle_1 7=index_0 8=index_1
+  Right hand: 9=palm_0 10=palm_1 11=palm_2 12=thumb_0 13=thumb_1 14=middle_0 15=middle_1 16=index_0 17=index_1
+  (palm_0/1/2 are equal-split zones of palm_link; no thumb_2 on real hardware)
 """
 
 import torch
 from tasks.common_observations.tactile_state import get_tactile_obs
 
-# ── Right-hand pad slices in the 16D tactile obs ───────────────────────────
-_R_ALL    = [8, 9, 10, 11, 12, 13, 14, 15]   # all 8 right-hand pads
-# Relative indices within f_right (shape N×8):
-# [0]=palm  [1]=thumb0  [2]=thumb1  [3]=thumb2
-# [4]=middle0  [5]=middle1  [6]=index0  [7]=index1
+# ── Right-hand pad slices in the 18D tactile obs ───────────────────────────
+_R_ALL    = [9, 10, 11, 12, 13, 14, 15, 16, 17]   # all 9 right-hand pads
+# Relative indices within f_right (shape N×9):
+# [0]=palm_0  [1]=palm_1  [2]=palm_2
+# [3]=thumb_0  [4]=thumb_1
+# [5]=middle_0  [6]=middle_1
+# [7]=index_0  [8]=index_1
 
 # ── Reward tuning constants ────────────────────────────────────────────────
 # Phase 1 — search
@@ -51,7 +54,7 @@ CLOSURE_COEFF       = 1.00   # scales tanh(opposition / CLOSURE_SAT)
 CLOSURE_SAT         = 3.00   # N total — opposition at which tanh saturates
 
 # Grasp gate thresholds for has_grasp (used to gate lift reward)
-GRASP_THUMB_THR     = 0.50   # N — minimum thumb differential force
+GRASP_THUMB_THR     = 0.30   # N — minimum thumb differential force (2 modules now, was 0.50 for 3)
 GRASP_OTHER_THR     = 0.50   # N — minimum opposing-finger differential force
 
 # Phase 4 — lift (gated on has_grasp)
@@ -91,13 +94,13 @@ def set_contact_baseline(env, device) -> None:
 def _check_force_closure(f_right: torch.Tensor) -> torch.Tensor:
     """Batched has_grasp: thumb AND at least one opposing finger engaged.
 
-    f_right: (N, 8) right-hand differential forces, relative indices:
-      [1:4] = thumb0/1/2,  [4:6] = middle0/1,  [6:8] = index0/1
+    f_right: (N, 9) right-hand differential forces, relative indices:
+      [3:5] = thumb_0/1,  [5:7] = middle_0/1,  [7:9] = index_0/1
     Returns: (N,) bool tensor
     """
-    thumb_max  = f_right[:, 1:4].max(dim=1).values
-    index_max  = f_right[:, 6:8].max(dim=1).values
-    middle_max = f_right[:, 4:6].max(dim=1).values
+    thumb_max  = f_right[:, 3:5].max(dim=1).values
+    index_max  = f_right[:, 7:9].max(dim=1).values
+    middle_max = f_right[:, 5:7].max(dim=1).values
     return (thumb_max > GRASP_THUMB_THR) & (
         (index_max > GRASP_OTHER_THR) | (middle_max > GRASP_OTHER_THR)
     )
@@ -119,14 +122,14 @@ def compute_reward_blind(
     has_grasp = torch.zeros(N, dtype=torch.bool, device=device)
 
     try:
-        f_raw = get_tactile_obs(env).to(device)          # (N, 16)
+        f_raw = get_tactile_obs(env).to(device)          # (N, 18)
 
         if _CONTACT_BASELINE is not None:
             f = (f_raw - _CONTACT_BASELINE).clamp(min=0.0)
         else:
             f = f_raw
 
-        f_right = f[:, _R_ALL]   # (N, 8) right-hand differential forces
+        f_right = f[:, _R_ALL]   # (N, 9) right-hand differential forces
 
         # ── Phase detection ────────────────────────────────────────────────
         active_r   = (f_right > PAL_FORCE_MIN).sum(dim=1).float()   # (N,)
@@ -148,8 +151,8 @@ def compute_reward_blind(
 
         # ── Phase 3: force closure — reward thumb opposing index/middle ────
         # min(thumb, opposing) via tanh: both sides must engage; smooth gradient
-        thumb_force    = f_right[:, 1:4].sum(dim=1)   # thumb0 + thumb1 + thumb2
-        opposing_force = f_right[:, 4:8].sum(dim=1)   # middle0+1 + index0+1
+        thumb_force    = f_right[:, 3:5].sum(dim=1)   # thumb_0 + thumb_1
+        opposing_force = f_right[:, 5:9].sum(dim=1)   # middle_0+1 + index_0+1
         opposition     = torch.minimum(thumb_force, opposing_force)
         r_closure      = CLOSURE_COEFF * torch.tanh(opposition / CLOSURE_SAT)
         reward        += r_closure

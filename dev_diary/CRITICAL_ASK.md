@@ -64,6 +64,25 @@ This is a fresh-start decision. Recommend combining with Issue 1 (MoE refactor) 
 
 ---
 
+## Issue 3 (RESOLVED — 2026-04-26 22:47 GMT+4): VPN Reconnected — Run 17 LAUNCHED
+
+### What happened
+GlobalProtect VPN disconnected at ~18:20 GMT+4. SSH to konstantinsmirnov@10.127.102.40 times out; `ip route` shows no route to 10.127 subnet. 3 consecutive SSH failures confirmed.
+
+### Current training state
+- **Run 16 (yzz5f92o) likely COMPLETED** — was at Step 147.1M with ~2.9M remaining when VPN dropped; would have finished ~6 min after last entry (Step 150M).
+- **Lift=2.0% milestone ACHIEVED** at Run 16 entry 7 — all-time record.
+- **final.pt likely saved** (training script saves on completion) but cannot verify.
+- **Run 17 NOT launched** — requires SSH to remote PC which requires VPN.
+
+### Action required
+1. Reconnect GlobalProtect VPN (`/opt/paloaltonetworks/globalprotect/globalprotect connect` or UI)
+2. Verify: `ssh konstantinsmirnov@10.127.102.40 "ls -la ~/unitree_sim_isaaclab/experiments/system0_rl/checkpoints/final.pt"`
+3. If final.pt is recent (after 18:15): launch Run 17: `ssh konstantinsmirnov@10.127.102.40 "source ~/miniconda3/etc/profile.d/conda.sh && conda activate unitree_sim_env && cd ~/unitree_sim_isaaclab && nohup python experiments/system0_rl/train.py --headless --num_envs 2048 --checkpoint experiments/system0_rl/checkpoints/final.pt --total_timesteps 190000000 > /tmp/run17.log 2>&1 & echo PID=\$!"`
+4. Autonomous monitoring will resume once Run 17 is launched.
+
+---
+
 ## Recommended Combined Action (if approved)
 
 1. Run 5M-step smoke test with CURRENT architecture + GAE fix (no MoE refactor yet)

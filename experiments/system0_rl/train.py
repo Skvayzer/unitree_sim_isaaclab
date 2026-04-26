@@ -9,7 +9,7 @@ with gentle touch and then grasp it.
 
 Architecture
 ────────────
-  obs  (85-D): right_finger_qpos(7) + qvel(7) + tactile_ext(64) + torques(7)
+  obs  (93-D): right_finger_qpos(7) + qvel(7) + tactile_ext(72) + torques(7)
   action (7-D): offset from default hand pose, bounded by tanh × delta_max
   intent(128-D): one-hot curriculum stage ([:4]), rest zero
 
@@ -135,25 +135,25 @@ def build_joint_index_maps(env):
 
 
 def build_obs_batch(env, sim_hand: list, device) -> torch.Tensor:
-    """Build (num_envs, 85) observation tensor.
+    """Build (num_envs, 93) observation tensor.
 
-    Layout: right_finger_qpos(7) | qvel(7) | tactile_ext(64) | torques(7)
+    Layout: right_finger_qpos(7) | qvel(7) | tactile_ext(72) | torques(7)
     """
     robot = env.scene["robot"]
     hand_pos = robot.data.joint_pos[:, sim_hand].to(device)   # (N, 7)
     hand_vel = robot.data.joint_vel[:, sim_hand].to(device)   # (N, 7)
 
     try:
-        tactile = get_tactile_obs_extended(env).to(device)    # (N, 64)
+        tactile = get_tactile_obs_extended(env).to(device)    # (N, 72)
     except Exception:
-        tactile = torch.zeros(hand_pos.shape[0], 64, device=device)
+        tactile = torch.zeros(hand_pos.shape[0], 72, device=device)
 
     try:
         torques = robot.data.applied_torque[:, sim_hand].to(device)  # (N, 7)
     except (AttributeError, IndexError):
         torques = torch.zeros_like(hand_pos)
 
-    obs = torch.cat([hand_pos, hand_vel, tactile, torques], dim=1)  # (N, 85)
+    obs = torch.cat([hand_pos, hand_vel, tactile, torques], dim=1)  # (N, 93)
     return torch.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
 
 
@@ -168,18 +168,18 @@ def build_left_joint_index_map(env) -> list:
 
 
 def build_rl_system0_obs(env, sim_right: list, sim_left: list, device) -> torch.Tensor:
-    """Build (num_envs, 92) observation tensor for RLSystem0Policy.
+    """Build (num_envs, 100) observation tensor for RLSystem0Policy.
 
-    Layout: tactile_ext(64) | right_torques(7) | right_qpos(7) | left_torques(7) | left_qpos(7)
+    Layout: tactile_ext(72) | right_torques(7) | right_qpos(7) | left_torques(7) | left_qpos(7)
     Left hand is zero-filled if sim_left is empty (G1 left hand not in scene).
     """
     robot = env.scene["robot"]
     N = robot.data.joint_pos.shape[0]
 
     try:
-        tactile = get_tactile_obs_extended(env).to(device)        # (N, 64)
+        tactile = get_tactile_obs_extended(env).to(device)        # (N, 72)
     except Exception:
-        tactile = torch.zeros(N, 64, device=device)
+        tactile = torch.zeros(N, 72, device=device)
 
     r_qpos = robot.data.joint_pos[:, sim_right].to(device)        # (N, 7)
     try:
@@ -197,7 +197,7 @@ def build_rl_system0_obs(env, sim_right: list, sim_left: list, device) -> torch.
         l_qpos    = torch.zeros(N, 7, device=device)
         l_torques = torch.zeros(N, 7, device=device)
 
-    obs = torch.cat([tactile, r_torques, r_qpos, l_torques, l_qpos], dim=1)  # (N, 92)
+    obs = torch.cat([tactile, r_torques, r_qpos, l_torques, l_qpos], dim=1)  # (N, 100)
     return torch.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
 
 
@@ -365,8 +365,8 @@ def main():
 
         # ── Rollout collection ────────────────────────────────────────────────
         for step in range(config.rollout_steps):
-            obs_batch        = build_obs_batch(env, sim_hand, device)            # (N, 85)
-            obs_with_targets = torch.cat([obs_batch, coarse_targets], dim=1)    # (N, 92)
+            obs_batch        = build_obs_batch(env, sim_hand, device)            # (N, 93)
+            obs_with_targets = torch.cat([obs_batch, coarse_targets], dim=1)    # (N, 100)
 
             with torch.no_grad():
                 raw_delta, log_probs, values = policy.act(obs_with_targets, intent)
