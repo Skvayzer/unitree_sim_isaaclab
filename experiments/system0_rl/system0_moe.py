@@ -22,22 +22,38 @@ from dataclasses import dataclass
 
 @dataclass
 class System0Config:
-    joint_dim: int = 28
-    vel_dim: int = 28
-    tactile_dim: int = 18  # 6 fingertips x 3 axes in sim
-    torque_dim: int = 28
-    target_dim: int = 28
+    # Arm: 5 controllable joints (shoulder_pitch/roll, elbow, wrist_roll/pitch)
+    arm_dim: int = 5
+    # Fingers: 7 right-hand joints
+    joint_dim: int = 7
+    vel_dim: int = 7
+    tactile_dim: int = 72
+    torque_dim: int = 7
+    # target_dim matches action space: 5 arm + 7 fingers = 12
+    target_dim: int = 12
     intent_dim: int = 128
     hidden_dim: int = 256
     n_experts: int = 8
     top_k: int = 2
-    action_dim: int = 28
+    # action_dim = 5 arm + 7 fingers = 12
+    action_dim: int = 12
     feedback_dim: int = 64
+    priv_dim: int = 26   # privileged dims for critic only (block state + contacts); 0 = symmetric
 
     @property
     def input_dim(self) -> int:
-        return (self.joint_dim + self.vel_dim + self.tactile_dim +
-                self.torque_dim + self.target_dim + self.intent_dim)
+        # actor: arm_pos(5)+arm_vel(5)+finger_pos(7)+finger_vel(7)+tactile(72)+torques(7)+targets(12)+intent(128)
+        return (self.arm_dim + self.arm_dim +        # arm pos + arm vel = 10
+                self.joint_dim + self.vel_dim +       # finger pos + vel = 14
+                self.tactile_dim +                    # 72
+                self.torque_dim +                     # 7
+                self.target_dim +                     # 12
+                self.intent_dim)                      # 128  → total 243
+
+    @property
+    def critic_input_dim(self) -> int:
+        # critic: actor_obs_with_targets(115) + priv(26) + intent(128) = 269
+        return self.input_dim + self.priv_dim
 
 
 class MoEFFN(nn.Module):
@@ -108,12 +124,14 @@ class System0MoEActor(nn.Module):
         self.log_std = nn.Parameter(torch.zeros(cfg.action_dim) - 1.0)
 
     def forward(self, obs, intent=None):
+        # Privileged-leak guard: actor must never receive more dims than obs_with_targets.
+        _expected = self.cfg.input_dim - self.cfg.intent_dim  # 115 = 103+12
+        assert obs.shape[-1] == _expected, (
+            f"Actor received {obs.shape[-1]}D, expected {_expected}D — privileged leak?")
+
         if intent is None and self.cfg.intent_dim > 0:
             intent = torch.zeros(obs.shape[0], self.cfg.intent_dim, device=obs.device)
-        if self.cfg.intent_dim > 0 and obs.shape[-1] < self.cfg.input_dim:
-            full_input = torch.cat([obs, intent], dim=-1)
-        else:
-            full_input = obs
+        full_input = torch.cat([obs, intent], dim=-1)
 
         x = self.input_encoder(full_input)
         x = x + self.moe1(self.norm1(x), intent)
@@ -131,27 +149,28 @@ class System0MoEActor(nn.Module):
 
 
 class System0Critic(nn.Module):
-    """Value function for PPO."""
+    """Value function for PPO. Accepts optional privileged obs (critic-only at train time)."""
 
     def __init__(self, cfg: System0Config):
         super().__init__()
+        self.cfg = cfg
         self.net = nn.Sequential(
-            nn.Linear(cfg.input_dim, cfg.hidden_dim),
+            nn.Linear(cfg.critic_input_dim, cfg.hidden_dim),
             nn.LayerNorm(cfg.hidden_dim),
             nn.SiLU(),
             nn.Linear(cfg.hidden_dim, cfg.hidden_dim),
             nn.SiLU(),
             nn.Linear(cfg.hidden_dim, 1),
         )
-        self.cfg = cfg
 
-    def forward(self, obs, intent=None):
-        if intent is None and self.cfg.intent_dim > 0:
-            intent = torch.zeros(obs.shape[0], self.cfg.intent_dim, device=obs.device)
-        if self.cfg.intent_dim > 0 and obs.shape[-1] < self.cfg.input_dim:
-            full_input = torch.cat([obs, intent], dim=-1)
-        else:
-            full_input = obs
+    def forward(self, obs, intent=None, priv_obs=None):
+        N = obs.shape[0]
+        if intent is None:
+            intent = torch.zeros(N, self.cfg.intent_dim, device=obs.device)
+        if priv_obs is None:
+            priv_obs = torch.zeros(N, self.cfg.priv_dim, device=obs.device)
+        # obs = actor_obs_with_targets (N, 115); layout: [obs | priv | intent] → (N, 269)
+        full_input = torch.cat([obs, priv_obs, intent], dim=-1)
         return self.net(full_input).squeeze(-1)
 
 
@@ -164,7 +183,7 @@ class System0PPOWrapper(nn.Module):
         self.critic = System0Critic(cfg)
         self.cfg = cfg
 
-    def act(self, obs, intent=None, deterministic=False):
+    def act(self, obs, intent=None, deterministic=False, priv_obs=None):
         """Sample action for environment interaction."""
         dist = self.actor.get_distribution(obs, intent)
         if deterministic:
@@ -172,15 +191,15 @@ class System0PPOWrapper(nn.Module):
         else:
             action = dist.sample()
         log_prob = dist.log_prob(action).sum(dim=-1)
-        value = self.critic(obs, intent)
+        value = self.critic(obs, intent, priv_obs)
         return action, log_prob, value
 
-    def evaluate_actions(self, obs, intent, actions):
+    def evaluate_actions(self, obs, intent, actions, priv_obs=None):
         """Evaluate actions for PPO update."""
         dist = self.actor.get_distribution(obs, intent)
         log_prob = dist.log_prob(actions).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
-        value = self.critic(obs, intent)
+        value = self.critic(obs, intent, priv_obs)
         return log_prob, entropy, value
 
 

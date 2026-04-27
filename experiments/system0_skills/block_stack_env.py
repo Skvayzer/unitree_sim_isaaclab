@@ -2,14 +2,16 @@
 System 0 Block Stacking Environment.
 
 ManagerBasedRLEnv with:
-- Robot (G1 + Dex3) with arm controlled by scripted trajectory
+- Robot (G1 + Dex3) with arm search DOF + finger RL control
 - Table (kinematic cuboid)
 - Block (dynamic cuboid on table)
-- Contact sensor on hand links
+- Contact sensor on hand links (filtered to block only)
 - Ground plane + dome light
 
-Actions: 7 right hand finger joint position deltas
-Observations: finger_pos(7) + finger_vel(7) + contact_force(3) + binary_contact(3) + phase_onehot(8) = 28
+Actions: 12 DOF — 5 arm/wrist (shoulder_pitch, shoulder_roll, elbow, wrist_roll, wrist_pitch)
+                 + 7 right-hand finger joints
+Arm joints locked/controllable split: shoulder_yaw + wrist_yaw remain locked (kinematic
+redundancy); the 5 controllable joints allow table-sweep + wrist reorientation on contact.
 """
 
 import os
@@ -164,13 +166,28 @@ def _make_robot_cfg() -> ArticulationCfg:
                 stiffness={".*": 10000.0},
                 damping={".*": 10000.0},
             ),
-            # Right arm — high stiffness for scripted trajectory tracking
-            "right_arm": ImplicitActuatorCfg(
-                joint_names_expr=["right_shoulder_.*_joint", "right_elbow_joint", "right_wrist_.*_joint"],
+            # Right arm: yaw joints stay locked (kinematic redundancy — no workspace gain)
+            "right_arm_locked": ImplicitActuatorCfg(
+                joint_names_expr=["right_shoulder_yaw_joint", "right_wrist_yaw_joint"],
+                effort_limit=1000.0,
+                velocity_limit=0.0,
+                stiffness={".*": 5000.0},
+                damping={".*": 500.0},
+            ),
+            # Right arm: controllable joints for blindfold-search behavior
+            # Stiffness 800 → holds pose against gravity but moves under policy command
+            "right_arm_controllable": ImplicitActuatorCfg(
+                joint_names_expr=[
+                    "right_shoulder_pitch_joint",
+                    "right_shoulder_roll_joint",
+                    "right_elbow_joint",
+                    "right_wrist_roll_joint",
+                    "right_wrist_pitch_joint",
+                ],
                 effort_limit=1000.0,
                 velocity_limit=100.0,
-                stiffness={".*": CFG.arm_stiffness},
-                damping={".*": CFG.arm_damping},
+                stiffness={".*": 800.0},
+                damping={".*": 80.0},
             ),
             # Hands — soft, RL-controlled (right) and locked (left)
             "left_hand": ImplicitActuatorCfg(
@@ -316,6 +333,7 @@ class BlockStackSceneCfg(InteractiveSceneCfg):
 
     fingertip_contacts: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*_hand_.*_link",
+        filter_prim_paths_expr=["/World/envs/env_.*/Block"],
         history_length=2,
         track_air_time=False,
         debug_vis=False,
@@ -338,7 +356,28 @@ class BlockStackSceneCfg(InteractiveSceneCfg):
 
 @configclass
 class ActionsCfg:
-    """Only control right hand finger joints (7 DOF)."""
+    """12 DOF: 5 arm/wrist joints first, then 7 finger joints.
+
+    Ordering (action[:, :5] = arm, action[:, 5:] = fingers):
+      0: right_shoulder_pitch_joint  — forward/back sweep
+      1: right_shoulder_roll_joint   — lateral sweep
+      2: right_elbow_joint           — height + reach
+      3: right_wrist_roll_joint      — pronation (thumb into opposition)
+      4: right_wrist_pitch_joint     — palm tilt
+      5-11: right hand finger joints (thumb_0/1/2, middle_0/1, index_0/1)
+    """
+    arm_pos: base_mdp.JointPositionActionCfg = base_mdp.JointPositionActionCfg(
+        asset_name="robot",
+        joint_names=[
+            "right_shoulder_pitch_joint",
+            "right_shoulder_roll_joint",
+            "right_elbow_joint",
+            "right_wrist_roll_joint",
+            "right_wrist_pitch_joint",
+        ],
+        scale=1.5,
+        use_default_offset=True,
+    )
     finger_pos: base_mdp.JointPositionActionCfg = base_mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=["right_hand_.*_joint"],

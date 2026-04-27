@@ -90,12 +90,59 @@ Module order (left hand slots 0-8, right hand slots 9-17):
 - **`activate_contact_sensors=False`** in: `tasks/common_scene/base_scene_pick_redblock_into_drawer.py:93`
 - **Standalone RL train**: `experiments/system0_rl/train.py` — uses `BlockStackEnvCfg` (NOT `System0TrainEnvCfg`)
 
-### Standalone RL (unitree_sim_isaaclab)
-- **Policy**: `experiments/system0_rl/system0_moe.py` — MoE with 8 experts, top-2, 4.40M params
+### Standalone RL (unitree_sim_isaaclab) — updated 2026-04-28
+- **Policy**: `experiments/system0_rl/system0_moe.py` — 8-expert top-2 MoE, 4.42M params
 - **Rewards**: `experiments/system0_rl/rewards.py` — `compute_reward_blind()`, `is_lift_success()`
 - **Config**: `experiments/system0_rl/config.py` — `TrainConfig`
 - **Env cfg**: `experiments/system0_rl/env_cfg.py` — `System0TrainEnvCfg`
 - **Train**: `experiments/system0_rl/train.py`
+
+#### Obs / Action / Privileged dims (as of 2026-04-28)
+| Tensor | Dim | Layout |
+|---|---|---|
+| Actor obs (`obs_with_targets`) | **115** | arm_pos(5)+arm_vel(5)+finger_pos(7)+finger_vel(7)+tactile_ext(72)+finger_torques(7)+targets(12) |
+| Intent | **128** | one-hot curriculum stage [:4], rest zero |
+| Actor input | **243** | obs_with_targets + intent |
+| Privileged obs (critic only) | **26** | block_xyz(3)+palm_vec(3)+thumb_vec(3)+block_vel(3)+block_quat(4)+contact_bool(5)+friction(1)+stage_onehot(4) |
+| Critic input | **269** | obs_with_targets(115) + priv(26) + intent(128) |
+| Action | **12** | arm_delta(5) + finger_delta(7), tanh × 0.5 rad |
+
+#### No-privileged-leak invariant (CRITICAL — 2026-04-28)
+- **Actor NEVER receives priv obs** — `System0MoEActor.forward()` asserts `obs.shape[-1] == 115`
+- Privileged obs flows: `build_privileged_obs()` → `System0Critic.forward()` → value estimate only
+- `build_obs_batch()` returns 103D (no targets, no priv); targets appended in rollout loop
+- If you modify any actor input: target dim is 12, actor expects exactly **115D** before intent
+
+#### Privileged feature layout (indices into 26D priv vector)
+| Idx | Feature | Notes |
+|---|---|---|
+| 0:3 | block_xyz **env-local** | `root_pos_w − env_origins` → range ~[-1,1]m; world frame would be ~5m scale and dominate critic's first layer |
+| 3:6 | block_to_palm_vec | `body_pos_w[:, palm_idx] − block_pos` |
+| 6:9 | block_to_thumb_vec | `body_pos_w[:, thumb_idx] − block_pos` |
+| 9:12 | block_vel | `block.data.root_lin_vel_w` |
+| 12:16 | block_quat | wxyz from `root_quat_w` |
+| 16 | palm_contact_bool | any pad 0-2 > 0.1N |
+| 17 | thumb_contact_bool | any pad 3-4 > 0.1N |
+| 18 | middle_contact_bool | any pad 5-6 > 0.1N |
+| 19 | index_contact_bool | any pad 7-8 > 0.1N |
+| 20 | has_grasp_bool | thumb AND (middle OR index) |
+| 21 | friction | fixed 0.5 (not exposed per-step) |
+| 22:26 | stage_onehot | curriculum stage 0-3 |
+
+#### Body indices (right arm, verified 2026-04-28)
+- `right_hand_palm_link` → body index **40**
+- `right_hand_thumb_2_link` (distal) → body index **54**
+
+#### Deferred sim-real tactile contract issues (DO NOT REGRESS — fix before real-robot deploy)
+These are **training-safe but deployment-blocking**. Policy trains correctly in sim; will not transfer cleanly to real robot without these fixes. Defer to a separate alignment session.
+
+1. **Fake palm equal-split** (`tactile_state.py:107`): sim divides palm scalar across 3 zones equally (`palm_force / 3`). Real SDK uses actual spatial contact positions. Policies trained against sim will see three identical palm values; real SDK will show spatially-varying palm signals.
+2. **DEX3_PAD_LINKS ordering mismatch**: sim maps palm at indices 0/1/2 per hand; real SDK places palms at indices 6/7/8. The module ordering contract is inverted.
+3. **Right-hand palm mirroring missing**: real SDK wires left palms as palm_2/palm_1/palm_0 (index→middle), right palms as palm_0/palm_1/palm_2 (middle→index). Sim treats both identically.
+
+#### Vestigial obs items (document, not fix)
+- **`coarse_targets` (12D)** at `train.py:521` is all-zeros — it was a CraftNet System 1 slot, unused in standalone RL. Kept for checkpoint compatibility with prior runs. Actor is 115D = 103D real obs + 12D zero-padding. Remove when starting a fresh training run that breaks checkpoint compat anyway.
+- **Curriculum stage one-hot duplicated**: present in both `intent[:, :4]` and `priv_obs[:, 22:26]`. Critic gets curriculum context twice. Redundant but harmless; a 4D saving on a 269D input is not worth a refactor.
 
 ---
 
@@ -227,4 +274,20 @@ Palm zones use equal-split (sim approximation); real SDK provides spatial contac
 4. **`activate_contact_sensors`**: confirmed `True` in `BlockStackEnvCfg` at line 60. No action needed.
 5. **RLSystem0Policy COMPLETE** (Phase 3, 2026-04-26, updated 2026-04-26 real-align): `experiments/system0_rl/system0_moe.py` — 4 experts, flat MoE. After real-align: obs_dim=100 (tactile_72|r_torq_7|r_qpos_7|l_torq_7|l_qpos_7), gate_dim=228. `build_rl_system0_obs()` in train.py now returns (N,100). Wire in next run by replacing `System0PPOWrapper` + `build_obs_batch()` with `RLSystem0Policy` + `build_rl_system0_obs()` + `build_left_joint_index_map()`. Current runs (1-17) use `System0PPOWrapper` (8 experts, 4.4M params) — checkpoint incompatible after real-align.
 6. **UnifoLM server** on remote PC uses 16592 MiB / 49140 MiB GPU. ~32GB free for RL training.
+7. ~~**filter_prim_paths_expr removed 2026-04-26**~~ **ROOT CAUSE OF RUNS 1–17 FAILURE — RESTORED 2026-04-27**. Removal caused table contacts (40–55 N differential) to contaminate ALL reward signal: palpation reward fired on palm-grazing-table, has_grasp false-positived on thumb-on-block + fingers-on-table, lift stayed at 0%. Fixed: restored `filter_prim_paths_expr=["/World/envs/env_.*/Block"]` in `BlockStackSceneCfg`. Note: original filter (2026-04-25) used wrong prim path `red_block`; correct path is `/Block`.
+
+---
+
+## Critical Do-Not-Do
+
+**NEVER remove `filter_prim_paths_expr` from `BlockStackSceneCfg.fingertip_contacts`** without replacing it with another mechanism that excludes table and floor contacts.
+
+- Without this filter, PhysX sends ALL contact pairs to the sensor (table, floor, self-contacts).
+- Table contact differentials of 40–55 N appear on middle/index fingers during normal OU exploration.
+- These 40–55 N signals satisfy the `has_grasp` gate threshold (0.50 N), triggering false positives.
+- The palpation reward fires on any 1-pad contact including table edge grazing.
+- Result: 100% reward signal contamination. Policy parks at "palm grazes table" local optimum. Lift stays 0% indefinitely regardless of training steps.
+- Evidence: Runs 1–17 (185M+ steps) all failed due to this single removal.
+
+Block prim path: `/World/envs/env_.*/Block` (capital B). NOT `red_block`, NOT `Red_block`.
 7. **Phase 2 verification still needed**: run 100-step scripted closing test — open hand should give all-zero contacts; closed on cube should give nonzero on contact pads.

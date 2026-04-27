@@ -12,14 +12,20 @@ class TrainConfig:
     control_dt: float = 0.01  # 100 Hz control
 
     # ── Observation dims ───────────────────────────────────────────────────
-    # Right hand only (7 finger joints).
+    # Arm: 5 controllable joints (shoulder_pitch/roll, elbow, wrist_roll/pitch).
+    arm_dim: int = 5      # right arm pos (and separately vel)
+    # Right hand: 7 finger joints.
     joint_dim: int = 7    # right finger qpos
     vel_dim: int = 7      # right finger qvel
     torque_dim: int = 7   # right finger applied torques
     # Extended tactile: 4 channels × 18 pads = 72.
     tactile_dim: int = 72
-    # Coarse target fed to MoE as context (same shape as action).
-    target_dim: int = 7
+    # Coarse target fed to MoE as context — matches 12-DOF action space.
+    target_dim: int = 12
+    # Privileged dims for critic ONLY (never seen by actor):
+    # block_xyz(3)+block_to_palm_vec(3)+block_to_thumb_vec(3)+block_vel(3)+block_quat(4)
+    # +contact_bool(5)+friction(1)+stage_onehot(4) = 26
+    priv_dim: int = 26
 
     # ── MoE architecture ──────────────────────────────────────────────────
     intent_dim: int = 128  # curriculum-stage encoding (one-hot @ [:4], rest zero)
@@ -50,7 +56,7 @@ class TrainConfig:
     gae_lambda: float = 0.95
     clip_eps: float = 0.2
     value_coeff: float = 0.5
-    entropy_coeff: float = 0.001  # was 0.01 — reduced 10× after entropy trap at step 1.3M (qg9b59c4)
+    entropy_coeff: float = 0.005  # raised 5× from 0.001; 0.001 cannot prevent/recover std collapse
     max_grad_norm: float = 0.5
     ppo_epochs: int = 4
     minibatch_size: int = 512
@@ -59,5 +65,5 @@ class TrainConfig:
     # ── Training schedule ─────────────────────────────────────────────────
     total_timesteps: int = 20_000_000  # was 10M; bumped to allow continuing from 10M checkpoint
     log_interval: int = 10   # PPO updates between logs
-    save_interval: int = 50  # PPO updates between saves
+    save_interval: int = 5   # PPO updates between saves (~2.6M steps at 2048 envs)
     checkpoint_dir: str = "experiments/system0_rl/checkpoints"

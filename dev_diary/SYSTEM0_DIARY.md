@@ -252,3 +252,95 @@ Root cause: entropy trap. When `entropy_coeff×dH/d(log_std)` > environment rewa
 - Entropy must be < 5 nats at first log entry (H7 validation)
 - Mean reward must be > -100/ep (not pinned at max entropy trap)
 - Kill condition: entropy ≥ 10 AND reward < -100/ep after 2 data points → CRITICAL_ASK.md
+
+---
+
+## 2026-04-27 — Root Cause of Runs 1–17 Zero Lift: Contact Filter Removal
+
+### What we found
+Run `1ci6xx5c` (latest, ~75K episodes, ~185M steps) showed:
+- `active_pads ≈ 1.0` (only 1 pad touching, always)
+- `opp_f = 40–55 N` (opposing finger "differential" force — physically impossible for a 50g block)
+- `has_grasp ≈ 1%` (near noise floor)
+- `r_lift_bonus = 0.0000` always
+- `Entropy = 1.505` frozen from step 0 — loaded from a collapsed checkpoint
+
+The 40–55 N "opposing force" was the smoking gun. A 50g cube (mg = 0.5 N) cannot resist 40 N of finger force — the block would be crushed through the table. Those forces were fingers hitting the TABLE, not the block. The contact baseline was captured at hover pose (fingers in air, baseline ≈ 0). During training, OU noise drives fingers into table contact. Table contact differential = 40–55 N. That is what `opp_f` was measuring.
+
+### Root cause
+**Bullet 3 of the 2026-04-26 fixes** removed `filter_prim_paths_expr` from `BlockStackSceneCfg.fingertip_contacts`. Without this filter, PhysX sends ALL contact pairs to the sensor — including table, ground plane, and self-contacts. Every downstream symptom traced to this single removal:
+- Palpation reward fired on table-contact (active_pads ≈ 1 = palm grazing table edge)
+- Force closure / has_grasp fired when thumb touched block + fingers pressed table (impossible geometry)
+- Zero lift: even when has_grasp fired, no real pinch existed → block never moved
+- Policy converged on "palm-graze-table" local optimum (135/ep palpation reward, easy and stable)
+- Entropy collapsed to 1.505; entropy_coeff=0.001 could not recover it
+
+### Fix applied (2026-04-27)
+1. **Restored `filter_prim_paths_expr=["/World/envs/env_.*/Block"]`** in `BlockStackSceneCfg.fingertip_contacts` — corrected path (original filter used `red_block` but block prim is `/Block`)
+2. **`entropy_coeff` 0.001 → 0.005** (5× raise; 0.001 cannot prevent or recover std collapse)
+3. **Fresh policy weights** — do NOT load any checkpoint from runs 1–17 (all collapsed)
+4. Palpation reward KEPT at PAL_COEFF=0.30 — signal is correct when contact source is correct
+5. `has_grasp` gate on lift KEPT — arm follows scripted trajectory; gate prevents sky-hook exploits
+
+### Expected behaviour after fix
+With filter on, table contacts return 0. Only block contact registers. opp_f during idle hover → ~0 N. When thumb + opposing fingers form real pinch on block → 0.5–3 N. has_grasp will fire only on real pinches. First lift_rate > 0% expected within 1–3M steps.
+
+### Kill condition
+If after 5M fresh steps lift_rate is still 0% → something beyond contact contamination is broken. Stop and investigate.
+
+---
+
+## 2026-04-27 — Run 18 Filter Verification (calls=2000)
+
+**WandB run**: `9ulz5zpl` — `s0_blind_2048envs_0427_2024`
+**PID**: 3383570 on konstantinsmirnov@10.127.102.40
+
+### Filter confirmed working
+First reward diagnostics at calls=500–2000:
+
+| calls | r_pal  | opp_f  | active_pads | thumb_f | has_grasp |
+|-------|--------|--------|-------------|---------|-----------|
+| 500   | 0.1084 | 10.085 | 1.89        | 0.000   | 0.000     |
+| 1000  | 0.0754 | 5.104  | 1.85        | 0.000   | 0.000     |
+| 1500  | 0.0708 | 4.600  | 1.98        | 0.000   | 0.000     |
+| 2000  | 0.0751 | 4.458  | 2.00        | 0.000   | 0.000     |
+
+**`opp_f` dropped from 40–55 N (runs 1–17) to 4–10 N and declining** — filter is working correctly.
+Residual 4–5 N is real block contact from random policy actions (active_pads ≈ 2 confirms fingers are touching block).
+Palpation reward active (`r_pal > 0`) — fingers genuinely reaching block.
+`thumb_f = 0` at initialization — expected, random policy has not learned thumb engagement yet.
+No lifts yet — expected at start of training.
+
+### Status
+Training proceeding normally. Monitoring for first lift emergence (expected within 1–3M steps).
+
+---
+
+## 2026-04-28 — Privileged critic + r_reach + 12-DOF action space
+
+### What changed
+- **12-DOF action space**: 5 arm/wrist joints (shoulder_pitch/roll, elbow, wrist_roll/pitch) + 7 fingers. Enables blindfold-search: arm sweeps table until contact, wrist reorients, fingers close.
+- **Asymmetric actor-critic (DexTouch/D3Grasp style)**: Actor stays blind (115D obs_with_targets). Critic gets 26 extra privileged dims: block_xyz(3)+block_to_palm(3)+block_to_thumb(3)+block_vel(3)+block_quat(4)+contact_bool(5)+friction(1)+stage_onehot(4). Critic total input = 269D.
+- **r_reach**: `-0.20 × dist(palm, block) × no_contact` — dense gradient toward block while hand is not touching. Palm position from `body_pos_w[:, right_hand_palm_link]`.
+- **Per-joint OU noise**: sigma=[0.15×3 arm, 0.20×2 wrist, 0.10×7 fingers] — wrist gets more exploration for orientation search.
+- **Actor leak guard**: `assert obs.shape[-1] == 115` in `System0MoEActor.forward()` — crashes immediately if priv dims accidentally reach actor.
+
+### Files touched
+- `experiments/system0_rl/config.py` — added `priv_dim=26`, `target_dim=12`
+- `experiments/system0_rl/system0_moe.py` — `critic_input_dim` property (269D), `System0Critic` uses privileged input, `System0PPOWrapper.act/evaluate_actions` accept `priv_obs`
+- `experiments/system0_rl/ppo.py` — `RolloutBuffer` stores `priv_observations (T,N,26)`, `get_batches` yields priv_obs, `ppo_update` passes to `evaluate_actions`
+- `experiments/system0_rl/rewards.py` — added `REACH_COEFF=0.20`, `palm_pos` parameter, `no_contact` initialized before try block, r_reach block after tactile try
+- `experiments/system0_rl/train.py` — added `build_body_index_maps`, `build_privileged_obs`, updated rollout loop and bootstrap to use priv_obs
+
+### Verified
+Full verification report at `dev_diary/PRIVILEGED_CRITIC_VERIFICATION.md`.
+- Actor assertion fires correctly on 141D input (privileged leak detected and blocked)
+- Critic receives 269D (115+26+128) as expected
+- Smoke test: 4 envs, 2048 steps, 2 PPO updates, clean exit, no NaN
+- Body maps found: palm=right_hand_palm_link(40), thumb_tip=right_hand_thumb_2_link(54)
+
+### No-privileged-leak invariant
+ANY future code that calls `policy.actor.forward()` or `policy.actor.get_distribution()` MUST pass only the 115D `obs_with_targets` tensor. Passing privileged obs to the actor will throw AssertionError — this is intentional.
+
+### Next
+Launch visual training (4 envs, non-headless) on desktop RTX 5080.

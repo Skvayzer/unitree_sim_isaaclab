@@ -16,36 +16,42 @@ class RolloutBuffer:
     """Stores rollout data with (T, N, ...) layout for correct per-env GAE."""
 
     def __init__(self, rollout_steps: int, num_envs: int, obs_dim: int,
-                 intent_dim: int, action_dim: int, device="cpu"):
+                 intent_dim: int, action_dim: int, priv_obs_dim: int = 0,
+                 device="cpu"):
         T, N = rollout_steps, num_envs
         self.T = T
         self.N = N
         self.device = device
         self.pos = 0  # current step index (0 .. T-1)
+        self.priv_obs_dim = priv_obs_dim
 
-        self.observations = torch.zeros(T, N, obs_dim,    device=device)
-        self.intents      = torch.zeros(T, N, intent_dim, device=device)
-        self.actions      = torch.zeros(T, N, action_dim, device=device)
-        self.log_probs    = torch.zeros(T, N,             device=device)
-        self.rewards      = torch.zeros(T, N,             device=device)
-        self.dones        = torch.zeros(T, N,             device=device)
-        self.values       = torch.zeros(T, N,             device=device)
-        self.advantages   = torch.zeros(T, N,             device=device)
-        self.returns      = torch.zeros(T, N,             device=device)
+        self.observations    = torch.zeros(T, N, obs_dim,    device=device)
+        self.intents         = torch.zeros(T, N, intent_dim, device=device)
+        self.priv_observations = torch.zeros(T, N, max(priv_obs_dim, 1), device=device)
+        self.actions         = torch.zeros(T, N, action_dim, device=device)
+        self.log_probs       = torch.zeros(T, N,             device=device)
+        self.rewards         = torch.zeros(T, N,             device=device)
+        self.dones           = torch.zeros(T, N,             device=device)
+        self.values          = torch.zeros(T, N,             device=device)
+        self.advantages      = torch.zeros(T, N,             device=device)
+        self.returns         = torch.zeros(T, N,             device=device)
 
     def add_step(self, obs: torch.Tensor, intent: torch.Tensor,
+                 priv_obs: "torch.Tensor | None",
                  actions: torch.Tensor, log_probs: torch.Tensor,
                  rewards: torch.Tensor, dones: torch.Tensor,
                  values: torch.Tensor) -> None:
         """Store one full step for all envs. All inputs shape (N, ...)."""
         t = self.pos
-        self.observations[t] = obs
-        self.intents[t]      = intent
-        self.actions[t]      = actions
-        self.log_probs[t]    = log_probs
-        self.rewards[t]      = rewards
-        self.dones[t]        = dones
-        self.values[t]       = values
+        self.observations[t]     = obs
+        self.intents[t]          = intent
+        if priv_obs is not None and self.priv_obs_dim > 0:
+            self.priv_observations[t] = priv_obs
+        self.actions[t]          = actions
+        self.log_probs[t]        = log_probs
+        self.rewards[t]          = rewards
+        self.dones[t]            = dones
+        self.values[t]           = values
         self.pos += 1
 
     def compute_advantages(self, last_values: torch.Tensor,
@@ -87,6 +93,7 @@ class RolloutBuffer:
 
         obs_flat       = self.observations[:T].reshape(total, -1)
         intents_flat   = self.intents[:T].reshape(total, -1)
+        priv_flat      = self.priv_observations[:T].reshape(total, -1) if self.priv_obs_dim > 0 else None
         actions_flat   = self.actions[:T].reshape(total, -1)
         log_probs_flat = self.log_probs[:T].reshape(total)
         adv_flat       = self.advantages[:T].reshape(total)
@@ -99,6 +106,7 @@ class RolloutBuffer:
             yield (
                 obs_flat[idx],
                 intents_flat[idx],
+                priv_flat[idx] if priv_flat is not None else None,
                 actions_flat[idx],
                 log_probs_flat[idx],
                 adv_flat[idx],
@@ -117,10 +125,10 @@ def ppo_update(policy, optimizer, buffer, config):
     n_updates         = 0
 
     for _ in range(config.ppo_epochs):
-        for obs, intent, actions, old_log_probs, advantages, returns in \
+        for obs, intent, priv_obs, actions, old_log_probs, advantages, returns in \
                 buffer.get_batches(config.minibatch_size):
 
-            log_probs, entropy, values = policy.evaluate_actions(obs, intent, actions)
+            log_probs, entropy, values = policy.evaluate_actions(obs, intent, actions, priv_obs)
 
             ratio  = (log_probs - old_log_probs).exp()
             surr1  = ratio * advantages
