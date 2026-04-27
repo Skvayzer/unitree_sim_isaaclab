@@ -3,7 +3,7 @@
 import time
 import threading
 from typing import Dict, List, Optional
-from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+import os
 from dds.dds_base import DDSObject
 
 
@@ -57,7 +57,10 @@ class DDSManager:
             return True
         
         try:
-            ChannelFactoryInitialize(1)
+            from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+            iface = os.getenv("UNITREE_DDS_IFACE", "lo")
+            domain_id = int(os.getenv("UNITREE_DDS_DOMAIN_ID", "1"))
+            ChannelFactoryInitialize(domain_id, iface)
             self.dds_initialized = True
             print("[DDSManager] DDS system initialized")
             return True
